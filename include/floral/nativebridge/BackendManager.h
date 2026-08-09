@@ -1,0 +1,88 @@
+/*
+ * Copyright 2026 FloralDroid
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef FLORAL_NATIVEBRIDGE_BACKEND_MANAGER_H_
+#define FLORAL_NATIVEBRIDGE_BACKEND_MANAGER_H_
+
+#include <string>
+
+#include "nativebridge/native_bridge.h"
+
+#include "floral/nativebridge/PolicyEngine.h"
+
+namespace floral::nativebridge {
+
+class BackendManager {
+public:
+  BackendManager();
+  ~BackendManager();
+
+  bool EnsureLoaded();
+  bool
+  Initialize(const android::NativeBridgeRuntimeCallbacks *runtime_callbacks,
+             const char *private_dir, const char *instruction_set);
+
+  bool IsCompatibleWith(uint32_t bridge_version);
+  const android::NativeBridgeCallbacks *callbacks() const { return callbacks_; }
+  const char *GetError() const;
+
+  void *LoadLibrary(const char *path, int flags) const;
+  void *GetTrampoline(void *handle, const char *name, const char *shorty,
+                      uint32_t len) const;
+  bool IsSupported(const char *path) const;
+  const android::NativeBridgeRuntimeValues *
+  GetAppEnv(const char *instruction_set) const;
+  android::NativeBridgeSignalHandlerFn GetSignalHandler(int signal) const;
+  int UnloadLibrary(void *handle) const;
+  bool IsPathSupported(const char *path) const;
+  bool InitAnonymousNamespace(const char *public_ns_sonames,
+                              const char *anon_ns_library_path) const;
+  android::native_bridge_namespace_t *
+  CreateNamespace(const char *name, const char *ld_library_path,
+                  const char *default_library_path, uint64_t type,
+                  const char *permitted_when_isolated_path,
+                  android::native_bridge_namespace_t *parent_ns) const;
+  bool LinkNamespaces(android::native_bridge_namespace_t *from,
+                      android::native_bridge_namespace_t *to,
+                      const char *shared_libs_sonames) const;
+  void *LoadLibraryExt(const char *path, int flags,
+                       android::native_bridge_namespace_t *ns) const;
+  android::native_bridge_namespace_t *GetVendorNamespace() const;
+  android::native_bridge_namespace_t *
+  GetExportedNamespace(const char *name) const;
+  void PreZygoteFork() const;
+
+  BackendKind selected_kind() const { return selection_.kind; }
+  const std::string &selected_path() const { return selected_path_; }
+
+private:
+  std::string ProcessName() const;
+  std::string BackendPath(BackendKind kind) const;
+  bool LoadSelectedBackend(const BackendSelection &selection);
+  void SetError(std::string message) const;
+
+  PolicyEngine policy_;
+  void *backend_handle_ = nullptr;
+  const android::NativeBridgeCallbacks *callbacks_ = nullptr;
+  BackendSelection selection_;
+  std::string selected_path_;
+  mutable std::string last_error_;
+  bool initialized_ = false;
+};
+
+} // namespace floral::nativebridge
+
+#endif // FLORAL_NATIVEBRIDGE_BACKEND_MANAGER_H_

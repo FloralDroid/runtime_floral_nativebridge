@@ -1,0 +1,65 @@
+package {
+    default_applicable_licenses: ["runtime_floral_nativebridge_license"],
+}
+
+license {
+    name: "runtime_floral_nativebridge_license",
+    visibility: [":__subpackages__"],
+    license_kinds: ["SPDX-license-identifier-Apache-2.0"],
+    license_text: ["LICENSE"],
+}
+
+cc_defaults {
+    name: "floral_nativebridge_defaults",
+    local_include_dirs: ["include"],
+    export_include_dirs: ["include"],
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+    ],
+    cpp_std: "c++17",
+}
+
+// ART loads this library from the system linker namespace using NativeBridgeItf.
+cc_library_shared {
+    name: "libmixbridge",
+    defaults: ["floral_nativebridge_defaults"],
+    srcs: [
+        "src/BackendManager.cpp",
+        "src/PolicyEngine.cpp",
+        "src/NativeBridgeRouter.cpp",
+    ],
+    header_libs: [
+        "jni_headers",
+        "libnativebridge-headers",
+    ],
+    shared_libs: [
+        "libbase",
+        "libdl",
+        "libjsoncpp",
+        "liblog",
+    ],
+    min_sdk_version: "29",
+}
+
+cc_test_host {
+    name: "floral_nativebridge_policy_test",
+    defaults: ["floral_nativebridge_defaults"],
+    srcs: [
+        "src/PolicyEngine.cpp",
+        "tests/PolicyEngineTest.cpp",
+    ],
+    shared_libs: ["libbase", "libjsoncpp"],
+}
+
+cc_test_host {
+    name: "floral_nativebridge_probe",
+    srcs: ["tests/NativeBridgeProbe.cpp"],
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+    ],
+    cpp_std: "c++17",
+}
