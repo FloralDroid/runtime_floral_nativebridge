@@ -36,7 +36,9 @@ paths are architecture-aware `/system/lib64/...` or `/system/lib/...` paths.
 
 The router deliberately does not fall back after a backend has initialized in
 a process. A failed load or initialization is reported to ART, preventing two
-translation runtimes from sharing one process state.
+translation runtimes from sharing one process state. Backend loading is
+deferred until `initialize`, after zygote fork, so process rules are evaluated
+in the application process rather than being fixed by the zygote.
 
 ## Scope
 

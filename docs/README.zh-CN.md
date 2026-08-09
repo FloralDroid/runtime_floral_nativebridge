@@ -33,7 +33,9 @@ Android 12 源码还需要先应用
 默认路径按 ABI 使用 `/system/lib64/` 或 `/system/lib/`。
 
 后端初始化后不会在同一进程内切换或回退。加载、接口检查或初始化失败会
-直接报告给 ART，避免两个转译运行时共享进程状态。NativeBridge 回调没有
+直接报告给 ART，避免两个转译运行时共享进程状态。后端会延迟到
+`initialize`、zygote fork 之后才加载，因而进程规则在应用进程内评估，
+不会被 zygote 提前固定。NativeBridge 回调没有
 提供包名、签名和版本信息，因此当前版本只按进程名选择；更细的规则需要
 后续 ART 配合。ABI 环境沿用后端返回值，不修改全局 `ro.product.cpu.*`。
 

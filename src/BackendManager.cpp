@@ -172,13 +172,13 @@ bool BackendManager::IsCompatibleWith(uint32_t bridge_version) {
       bridge_version > kMaxNativeBridgeVersion) {
     return false;
   }
-  if (!EnsureLoaded()) {
-    return false;
-  }
-  if (callbacks_->isCompatibleWith != nullptr) {
+  // ART asks this before InitializeNativeBridge(), while the process is still
+  // the zygote. Do not load a backend here or all app children would inherit
+  // one zygote-wide selection and process rules could never take effect.
+  if (callbacks_ != nullptr && callbacks_->isCompatibleWith != nullptr) {
     return callbacks_->isCompatibleWith(bridge_version);
   }
-  return callbacks_->version >= bridge_version;
+  return callbacks_ == nullptr || callbacks_->version >= bridge_version;
 }
 
 void *BackendManager::LoadLibrary(const char *path, int flags) const {
