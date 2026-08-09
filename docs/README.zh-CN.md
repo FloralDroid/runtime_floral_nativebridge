@@ -14,7 +14,7 @@ Android 12 源码还需要先应用
 
 ## 策略文件
 
-可选策略文件为 `/mnt/vendor/floral_stream/nativebridge.json`。文件缺失或
+可选策略文件为 `/ipc/floral_stream/nativebridge.json`。文件缺失或
 格式错误时使用内置 `auto` 策略：先尝试 NDK Translation，再尝试 Houdini。
 进程规则先匹配完整进程名，再匹配 `:` 前的包名。
 

@@ -15,7 +15,7 @@ before Soong can consume the ART callback header from this system library.
 
 ## Policy
 
-The optional policy file is `/mnt/vendor/floral_stream/nativebridge.json`.
+The optional policy file is `/ipc/floral_stream/nativebridge.json`.
 Missing or malformed files use the built-in `auto` policy. `auto` tries NDK
 Translation first and Houdini second. A process rule matches the full process
 name first and then the package portion before `:`.

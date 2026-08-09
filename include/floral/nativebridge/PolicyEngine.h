@@ -38,7 +38,7 @@ struct BackendSelection {
 class PolicyEngine {
 public:
   static constexpr const char *kDefaultPath =
-      "/mnt/vendor/floral_stream/nativebridge.json";
+      "/ipc/floral_stream/nativebridge.json";
 
   static PolicyEngine Load(std::string path = kDefaultPath);
 
