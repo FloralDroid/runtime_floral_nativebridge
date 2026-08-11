@@ -20,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace floral::nativebridge {
 
@@ -33,6 +34,7 @@ struct BackendSelection {
   BackendKind kind = BackendKind::kAuto;
   std::string name = "auto";
   std::string reason = "default";
+  std::vector<BackendKind> candidates;
 };
 
 class PolicyEngine {

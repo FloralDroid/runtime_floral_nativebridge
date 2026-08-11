@@ -74,7 +74,7 @@ private:
   bool LoadSelectedBackend(const BackendSelection &selection);
   void SetError(std::string message) const;
 
-  PolicyEngine policy_;
+  std::string policy_path_;
   void *backend_handle_ = nullptr;
   const android::NativeBridgeCallbacks *callbacks_ = nullptr;
   BackendSelection selection_;

@@ -39,7 +39,10 @@ int main() {
     policy << R"({
       "default_backend": "houdini",
       "packages": {
-        "com.example.game": "ndk",
+        "com.example.game": {
+          "mode": "auto",
+          "candidates": ["houdini", "ndk"]
+        },
         "com.example.game:remote": "houdini"
       }
     })";
@@ -50,15 +53,39 @@ int main() {
   const auto exact = engine.Select("com.example.game");
   const auto process = engine.Select("com.example.game:remote");
   const auto fallback = engine.Select("com.other.app");
+
+  {
+    std::ofstream policy(path, std::ios::trunc);
+    policy << R"({
+      "default_backend": "ndk",
+      "packages": {
+        "com.example.game": {
+          "mode": "auto",
+          "candidates": ["ndk", "houdini"],
+          "selected_backend": "houdini"
+        }
+      }
+    })";
+  }
+  const floral::nativebridge::PolicyEngine reloaded =
+      floral::nativebridge::PolicyEngine::Load(path);
+  const auto refreshed = reloaded.Select("com.example.game");
   unlink(path);
 
   const bool ok =
       engine.loaded() &&
-      Check(exact.kind == floral::nativebridge::BackendKind::kNdk,
+      Check(exact.kind == floral::nativebridge::BackendKind::kAuto,
             "exact process rule") &&
+      Check(exact.candidates.size() == 2 &&
+                exact.candidates[0] == floral::nativebridge::BackendKind::kHoudini,
+            "candidate order") &&
       Check(process.kind == floral::nativebridge::BackendKind::kHoudini,
             "process rule") &&
       Check(fallback.kind == floral::nativebridge::BackendKind::kHoudini,
-            "default rule");
+            "default rule") &&
+      Check(refreshed.kind == floral::nativebridge::BackendKind::kHoudini &&
+                refreshed.candidates.size() == 1 &&
+                refreshed.candidates[0] == floral::nativebridge::BackendKind::kHoudini,
+            "selected backend reload");
   return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

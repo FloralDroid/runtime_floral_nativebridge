@@ -2,4 +2,5 @@
 PRODUCT_PACKAGES += libmixbridge
 
 PRODUCT_PROPERTY_OVERRIDES += \
-    ro.dalvik.vm.native.bridge=libmixbridge.so
+    ro.dalvik.vm.native.bridge=libmixbridge.so \
+    ro.floral.nativebridge.hybrid_elf=1

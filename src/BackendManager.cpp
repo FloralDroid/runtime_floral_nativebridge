@@ -23,8 +23,23 @@ namespace floral::nativebridge {
 namespace {
 
 constexpr char kInterfaceSymbol[] = "NativeBridgeItf";
-constexpr uint32_t kMinNativeBridgeVersion = 1;
+constexpr uint32_t kRequiredNativeBridgeVersion = 3;
 constexpr uint32_t kMaxNativeBridgeVersion = 6;
+
+bool HasRequiredCallbacks(const android::NativeBridgeCallbacks *callbacks) {
+  return callbacks->initialize != nullptr &&
+         callbacks->loadLibrary != nullptr &&
+         callbacks->getTrampoline != nullptr &&
+         callbacks->isSupported != nullptr && callbacks->getAppEnv != nullptr &&
+         callbacks->isCompatibleWith != nullptr &&
+         callbacks->getSignalHandler != nullptr &&
+         callbacks->unloadLibrary != nullptr && callbacks->getError != nullptr &&
+         callbacks->isPathSupported != nullptr &&
+         callbacks->initAnonymousNamespace != nullptr &&
+         callbacks->createNamespace != nullptr &&
+         callbacks->linkNamespaces != nullptr &&
+         callbacks->loadLibraryExt != nullptr;
+}
 
 std::string ReadProcessName() {
   char buffer[512] = {};
@@ -53,8 +68,8 @@ std::string ArchitectureLibraryDirectory() {
 } // namespace
 
 BackendManager::BackendManager()
-    : policy_(PolicyEngine::Load(android::base::GetProperty(
-          "ro.floral.nativebridge.policy", PolicyEngine::kDefaultPath))) {}
+    : policy_path_(android::base::GetProperty(
+          "ro.floral.nativebridge.policy", PolicyEngine::kDefaultPath)) {}
 
 BackendManager::~BackendManager() {
   if (backend_handle_ != nullptr) {
@@ -95,11 +110,15 @@ std::string BackendManager::BackendPath(BackendKind kind) const {
 }
 
 bool BackendManager::LoadSelectedBackend(const BackendSelection &selection) {
-  const BackendKind candidates[] = {BackendKind::kNdk, BackendKind::kHoudini};
-  const size_t candidate_count = selection.kind == BackendKind::kAuto ? 2 : 1;
-  for (size_t i = 0; i < candidate_count; ++i) {
-    const BackendKind kind =
-        selection.kind == BackendKind::kAuto ? candidates[i] : selection.kind;
+  const std::vector<BackendKind> default_candidates = {
+      BackendKind::kNdk, BackendKind::kHoudini};
+  const std::vector<BackendKind> &candidates = selection.candidates.empty()
+                                                    ? default_candidates
+                                                    : selection.candidates;
+  for (const BackendKind kind : candidates) {
+    if (kind == BackendKind::kAuto) {
+      continue;
+    }
     const std::string path = BackendPath(kind);
     if (path.empty()) {
       continue;
@@ -108,7 +127,7 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection) {
     void *handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (handle == nullptr) {
       const char *error = dlerror();
-      if (selection.kind != BackendKind::kAuto) {
+      if (selection.kind != BackendKind::kAuto && candidates.size() == 1) {
         SetError("cannot load " + std::string(BackendKindName(kind)) +
                  " backend " + path + ": " +
                  (error == nullptr ? "unknown error" : error));
@@ -118,9 +137,13 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection) {
 
     auto *callbacks = reinterpret_cast<const android::NativeBridgeCallbacks *>(
         dlsym(handle, kInterfaceSymbol));
-    if (callbacks == nullptr || callbacks->version < kMinNativeBridgeVersion ||
-        callbacks->initialize == nullptr) {
-      SetError("backend " + path + " has no usable NativeBridgeItf");
+    if (callbacks == nullptr ||
+        callbacks->version < kRequiredNativeBridgeVersion ||
+        !HasRequiredCallbacks(callbacks) ||
+        !callbacks->isCompatibleWith(kRequiredNativeBridgeVersion)) {
+      SetError("backend " + path +
+               " does not provide the Android 12 NativeBridge namespace "
+               "interface");
       dlclose(handle);
       continue;
     }
@@ -145,7 +168,10 @@ bool BackendManager::EnsureLoaded() {
   if (callbacks_ != nullptr) {
     return true;
   }
-  selection_ = policy_.Select(ProcessName());
+  // The manager is constructed in zygote. Load the policy only after fork so
+  // each new application process observes the latest host configuration.
+  const PolicyEngine policy = PolicyEngine::Load(policy_path_);
+  selection_ = policy.Select(ProcessName());
   return LoadSelectedBackend(selection_);
 }
 
@@ -168,7 +194,7 @@ bool BackendManager::Initialize(
 }
 
 bool BackendManager::IsCompatibleWith(uint32_t bridge_version) {
-  if (bridge_version < kMinNativeBridgeVersion ||
+  if (bridge_version == 0 ||
       bridge_version > kMaxNativeBridgeVersion) {
     return false;
   }

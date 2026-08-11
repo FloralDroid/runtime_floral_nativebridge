@@ -21,18 +21,55 @@ namespace {
 BackendSelection SelectionFromJson(const Json::Value &value,
                                    std::string reason) {
   BackendSelection selection;
-  if (!value.isString()) {
+  if (value.isString()) {
+    const std::string backend = value.asString();
+    selection.kind = ParseBackendKind(backend);
+    selection.name = BackendKindName(selection.kind);
+    selection.reason = std::move(reason);
+    if (selection.kind == BackendKind::kAuto) {
+      selection.candidates = {BackendKind::kNdk, BackendKind::kHoudini};
+    } else {
+      selection.candidates = {selection.kind};
+    }
+    if (selection.kind == BackendKind::kAuto && backend != "auto") {
+      LOG(WARNING) << "Unknown Floral NativeBridge backend '" << backend
+                   << "'; using auto selection";
+    }
+    return selection;
+  }
+  if (!value.isObject()) {
     selection.reason = std::move(reason);
     return selection;
   }
 
-  const std::string backend = value.asString();
+  // The policy file may keep candidate order and an explicit selected backend
+  // in one object. The selected value is preferred for the next process.
+  std::string backend = "auto";
+  if (value["selected_backend"].isString()) {
+    backend = value["selected_backend"].asString();
+  } else if (value["backend"].isString()) {
+    backend = value["backend"].asString();
+  } else if (value["mode"].isString()) {
+    backend = value["mode"].asString();
+  }
   selection.kind = ParseBackendKind(backend);
   selection.name = BackendKindName(selection.kind);
   selection.reason = std::move(reason);
-  if (selection.kind == BackendKind::kAuto && backend != "auto") {
-    LOG(WARNING) << "Unknown Floral NativeBridge backend '" << backend
-                 << "'; using auto selection";
+  if (value["candidates"].isArray()) {
+    for (const Json::Value &candidate : value["candidates"]) {
+      if (!candidate.isString()) {
+        continue;
+      }
+      const BackendKind kind = ParseBackendKind(candidate.asString());
+      if (kind != BackendKind::kAuto) {
+        selection.candidates.push_back(kind);
+      }
+    }
+  }
+  if (selection.kind != BackendKind::kAuto) {
+    selection.candidates = {selection.kind};
+  } else if (selection.candidates.empty()) {
+    selection.candidates = {BackendKind::kNdk, BackendKind::kHoudini};
   }
   return selection;
 }
@@ -68,6 +105,7 @@ PolicyEngine PolicyEngine::Load(std::string path) {
       .kind = BackendKind::kAuto,
       .name = BackendKindName(BackendKind::kAuto),
       .reason = "built-in default",
+      .candidates = {BackendKind::kNdk, BackendKind::kHoudini},
   };
 
   std::ifstream file(engine.path_);
