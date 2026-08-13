@@ -30,6 +30,8 @@ public:
   BackendManager();
   ~BackendManager();
 
+  void ConfigureProcessContext(const char *process_name,
+                               const char *app_data_dir);
   bool EnsureLoaded();
   bool
   Initialize(const android::NativeBridgeRuntimeCallbacks *runtime_callbacks,
@@ -70,16 +72,20 @@ public:
 
 private:
   std::string ProcessName() const;
+  static std::string PackageNameFromDataDir(const char *app_data_dir);
   std::string BackendPath(BackendKind kind) const;
   bool LoadSelectedBackend(const BackendSelection &selection);
   void SetError(std::string message) const;
 
   std::string policy_path_;
+  std::string process_name_;
+  std::string package_name_;
   void *backend_handle_ = nullptr;
   const android::NativeBridgeCallbacks *callbacks_ = nullptr;
   BackendSelection selection_;
   std::string selected_path_;
   mutable std::string last_error_;
+  bool selection_prepared_ = false;
   bool initialized_ = false;
 };
 

@@ -25,6 +25,7 @@ cc_defaults {
 cc_library_shared {
     name: "libmixbridge",
     defaults: ["floral_nativebridge_defaults"],
+    init_rc: ["floral-nativebridge.rc"],
     srcs: [
         "src/BackendManager.cpp",
         "src/PolicyEngine.cpp",

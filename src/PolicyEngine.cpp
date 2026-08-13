@@ -161,4 +161,48 @@ BackendSelection PolicyEngine::Select(std::string_view process_name) const {
   return default_selection_;
 }
 
+BackendSelection PolicyEngine::ApplyRuntimeState(BackendSelection selection,
+                                                 std::string_view process_name,
+                                                 std::string path) {
+  // Explicit host rules are authoritative. Runtime recovery only advances an
+  // auto rule after Android has observed an early native crash.
+  if (selection.kind != BackendKind::kAuto || process_name.empty()) {
+    return selection;
+  }
+
+  std::ifstream file(path);
+  if (!file.is_open()) {
+    return selection;
+  }
+  std::stringstream contents;
+  contents << file.rdbuf();
+  const std::string input = contents.str();
+  Json::Value root;
+  Json::CharReaderBuilder builder;
+  std::string errors;
+  std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+  if (!reader->parse(input.data(), input.data() + input.size(), &root,
+                     &errors) ||
+      !root.isObject()) {
+    LOG(WARNING) << "Cannot parse Floral NativeBridge state " << path << ": "
+                 << errors;
+    return selection;
+  }
+
+  const Json::Value package = root["packages"][std::string(process_name)];
+  if (!package.isObject() || !package["selected_backend"].isString()) {
+    return selection;
+  }
+  const std::string backend = package["selected_backend"].asString();
+  const BackendKind kind = ParseBackendKind(backend);
+  if (kind == BackendKind::kAuto) {
+    return selection;
+  }
+  selection.kind = kind;
+  selection.name = BackendKindName(kind);
+  selection.reason = "Android runtime state";
+  selection.candidates = {kind};
+  return selection;
+}
+
 } // namespace floral::nativebridge

@@ -1,0 +1,8 @@
+on post-fs-data
+    # This file is a per-boot cache. Removing it first ensures that deleting an
+    # optional host policy restores the built-in auto policy after restart.
+    mkdir /data/system/floral 0700 system system
+    rm /data/system/floral/nativebridge-policy.json
+    copy /ipc/floral_stream/nativebridge.json /data/system/floral/nativebridge-policy.json
+    chown system system /data/system/floral/nativebridge-policy.json
+    chmod 0600 /data/system/floral/nativebridge-policy.json

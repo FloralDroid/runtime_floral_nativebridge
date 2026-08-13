@@ -70,6 +70,23 @@ int main() {
   const floral::nativebridge::PolicyEngine reloaded =
       floral::nativebridge::PolicyEngine::Load(path);
   const auto refreshed = reloaded.Select("com.example.game");
+
+  {
+    std::ofstream state(path, std::ios::trunc);
+    state << R"({
+      "version": 1,
+      "packages": {
+        "com.example.game": {"selected_backend": "houdini"}
+      }
+    })";
+  }
+  const auto recovered = floral::nativebridge::PolicyEngine::ApplyRuntimeState(
+      exact, "com.example.game", path);
+  const auto locked = floral::nativebridge::PolicyEngine::ApplyRuntimeState(
+      process, "com.example.game", path);
+  const auto recovered_process =
+      floral::nativebridge::PolicyEngine::ApplyRuntimeState(
+          exact, "com.example.game:worker", path);
   unlink(path);
 
   const bool ok =
@@ -86,6 +103,14 @@ int main() {
       Check(refreshed.kind == floral::nativebridge::BackendKind::kHoudini &&
                 refreshed.candidates.size() == 1 &&
                 refreshed.candidates[0] == floral::nativebridge::BackendKind::kHoudini,
-            "selected backend reload");
+            "selected backend reload") &&
+      Check(recovered.kind == floral::nativebridge::BackendKind::kHoudini &&
+                recovered.reason == "Android runtime state",
+            "runtime recovery state") &&
+      Check(locked.kind == floral::nativebridge::BackendKind::kHoudini &&
+                locked.reason == "process rule",
+            "explicit host rule remains locked") &&
+      Check(recovered_process.kind == floral::nativebridge::BackendKind::kAuto,
+            "runtime state remains process-specific");
   return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

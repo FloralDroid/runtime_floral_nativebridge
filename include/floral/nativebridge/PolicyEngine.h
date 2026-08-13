@@ -40,11 +40,15 @@ struct BackendSelection {
 class PolicyEngine {
 public:
   static constexpr const char *kDefaultPath =
-      "/ipc/floral_stream/nativebridge.json";
+      "/data/system/floral/nativebridge-policy.json";
 
   static PolicyEngine Load(std::string path = kDefaultPath);
 
   BackendSelection Select(std::string_view process_name) const;
+
+  static BackendSelection ApplyRuntimeState(
+      BackendSelection selection, std::string_view process_name,
+      std::string path = "/data/system/floral/nativebridge-state.json");
 
   const std::string &path() const { return path_; }
   bool loaded() const { return loaded_; }

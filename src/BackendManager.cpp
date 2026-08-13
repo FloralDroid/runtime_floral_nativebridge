@@ -94,6 +94,35 @@ const char *BackendManager::GetError() const {
 
 std::string BackendManager::ProcessName() const { return ReadProcessName(); }
 
+std::string BackendManager::PackageNameFromDataDir(const char *app_data_dir) {
+  if (app_data_dir == nullptr || *app_data_dir == '\0') {
+    return {};
+  }
+  std::string path(app_data_dir);
+  while (path.size() > 1 && path.back() == '/') {
+    path.pop_back();
+  }
+  const size_t separator = path.find_last_of('/');
+  return separator == std::string::npos ? path : path.substr(separator + 1);
+}
+
+void BackendManager::ConfigureProcessContext(const char *process_name,
+                                             const char *app_data_dir) {
+  if (callbacks_ != nullptr || initialized_) {
+    return;
+  }
+  process_name_ = process_name == nullptr ? "" : process_name;
+  package_name_ = PackageNameFromDataDir(app_data_dir);
+
+  // This runs in the forked zygote child before dropping privileges. It can
+  // safely read Android-owned 0600 state without exposing it to applications.
+  const PolicyEngine policy = PolicyEngine::Load(policy_path_);
+  selection_ = policy.Select(process_name_.empty() ? package_name_ : process_name_);
+  selection_ = PolicyEngine::ApplyRuntimeState(
+      std::move(selection_), process_name_.empty() ? package_name_ : process_name_);
+  selection_prepared_ = true;
+}
+
 std::string BackendManager::BackendPath(BackendKind kind) const {
   const std::string default_path = ArchitectureLibraryDirectory();
   switch (kind) {
@@ -168,10 +197,12 @@ bool BackendManager::EnsureLoaded() {
   if (callbacks_ != nullptr) {
     return true;
   }
-  // The manager is constructed in zygote. Load the policy only after fork so
-  // each new application process observes the latest host configuration.
-  const PolicyEngine policy = PolicyEngine::Load(policy_path_);
-  selection_ = policy.Select(ProcessName());
+  if (!selection_prepared_) {
+    // Non-zygote callers retain a conservative fallback for diagnostics.
+    const PolicyEngine policy = PolicyEngine::Load(policy_path_);
+    selection_ = policy.Select(ProcessName());
+    selection_prepared_ = true;
+  }
   return LoadSelectedBackend(selection_);
 }
 

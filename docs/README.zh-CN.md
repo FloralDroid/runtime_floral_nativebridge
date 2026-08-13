@@ -8,18 +8,20 @@ x86 Floral 产品应继承 `system/floral/nativebridge/nativebridge.mk`，由产
 片段安装库并设置 `ro.dalvik.vm.native.bridge=libmixbridge.so`；纯 ARM 产品
 不要继承该片段。
 
-Android 12 源码还需要先应用两个配套补丁：
+Android 12 源码还需要三个 ART 配套补丁：
 `redroid-patches/android-12.0.0_r32/art/0001-expose-nativebridge-headers-to-floral.patch`，
-以及 `0002-support-hybrid-nativebridge-elf-loading.patch`。前者开放 ART 回调头文件，
-后者让桥接 classloader 能按 ELF 架构选择宿主或转译 namespace。
+`0002-support-hybrid-nativebridge-elf-loading.patch` 和
+`0003-pass-Floral-NativeBridge-process-context.patch`。它们分别开放 ART 回调头文件、
+让桥接 classloader 按 ELF 架构选择 namespace，并在 zygote 降权前传入真实进程
+身份。frameworks/base 配套补丁负责保存选择和处理早期 native crash。
 
 ## 策略文件
 
-可选策略文件为 `/ipc/floral_stream/nativebridge.json`。文件缺失或
+宿主可选策略文件为 `/ipc/floral_stream/nativebridge.json`。init 在每次开机将其
+复制到 Android 私有缓存。文件缺失或
 格式错误时使用内置 `auto` 策略：先尝试 NDK Translation，再尝试 Houdini。
-进程规则先匹配完整进程名，再匹配 `:` 前的包名。策略在每个应用进程初始化
-NativeBridge 时重新读取，修改后需要结束并重新启动目标应用进程。宿主应将
-文件设为应用可读但不可写，例如权限 `0644`。
+进程规则先匹配完整进程名，再匹配 `:` 前的包名。修改宿主策略后需要重启容器
+刷新缓存，Android 应用无需读取宿主文件。
 
 ```json
 {
@@ -39,21 +41,25 @@ NativeBridge 时重新读取，修改后需要结束并重新启动目标应用�
 ```
 
 原有字符串规则继续兼容。对象规则用于保存候选顺序和可选的显式
-`selected_backend`；存在该字段时运行时只使用已选后端，否则应用进程初始化
-期间由 `auto` 按 `candidates` 顺序尝试。
+`selected_backend`；存在该字段时运行时只使用已选后端，Android 不会覆盖。
+`auto` 规则由 Android 保存进程版本和候选结果。ARM 转译进程在启动后 15 秒内
+发生 native crash 时，Android 会切换到尚未失败的下一候选并恢复原任务；普通
+Java 崩溃、ANR、非 ARM 进程及窗口外崩溃不参与回退。每个候选在同一应用版本
+中只尝试一次，应用版本变化时重置该进程状态。
 
 可以通过只读属性覆盖后端路径：
 `ro.floral.nativebridge.ndk` 和 `ro.floral.nativebridge.houdini`。
 默认路径按 ABI 使用 `/system/lib64/` 或 `/system/lib/`。
 
-路由器不会监看进程，后端初始化后也不会切换或回退。应用进程生命周期、
-崩溃和 ANR 仍由 Android 负责。后端必须提供 Android 12 使用的
+路由器不会监看进程，后端初始化后也不会在进程内切换。应用生命周期、早期
+native crash 回退和任务恢复均由 Android 内部负责，不依赖宿主程序。运行状态
+通过 `AtomicFile` 写入 `/data/system/floral/nativebridge-state.json`，不使用
+SQLite。后端必须提供 Android 12 使用的
 NativeBridge v3 namespace 接口；加载、接口检查或初始化失败会直接报告给
-ART，避免两个转译运行时共享进程状态。策略读取和后端加载都会延迟到
-`initialize`、zygote fork 之后才加载，因而进程规则在应用进程内评估，
-不会被 zygote 提前固定。NativeBridge 回调没有
-提供包名、签名和版本信息，因此当前版本只按进程名选择；更细的规则需要
-后续 ART 配合。ABI 环境沿用后端返回值，不修改全局 `ro.product.cpu.*`。
+ART，避免两个转译运行时共享进程状态。策略读取和后端加载都会延迟到 zygote
+fork 之后；ART 在降权前明确传入 nice name 和应用数据目录，不再依赖初始化
+阶段的 `/proc/self/cmdline`。ABI 环境沿用后端返回值，不修改全局
+`ro.product.cpu.*`。
 
 产品片段默认启用 `ro.floral.nativebridge.hybrid_elf=1`。配套 ART 补丁会为
 桥接 classloader 同时建立宿主和桥接 namespace；应用通过绝对路径加载动态

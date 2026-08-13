@@ -16,6 +16,11 @@ BackendManager &Manager() {
   return manager;
 }
 
+void ConfigureProcessContext(const char *process_name,
+                             const char *app_data_dir) {
+  Manager().ConfigureProcessContext(process_name, app_data_dir);
+}
+
 bool Initialize(const android::NativeBridgeRuntimeCallbacks *runtime_callbacks,
                 const char *private_dir, const char *instruction_set) {
   return Manager().Initialize(runtime_callbacks, private_dir, instruction_set);
@@ -92,6 +97,13 @@ void PreZygoteFork() { Manager().PreZygoteFork(); }
 
 } // namespace
 } // namespace floral::nativebridge
+
+// ART discovers this optional Floral extension before the zygote child drops
+// privileges. It is intentionally separate from the stable NativeBridge ABI.
+extern "C" void FloralNativeBridgeSetProcessContext(const char *process_name,
+                                                    const char *app_data_dir) {
+  floral::nativebridge::ConfigureProcessContext(process_name, app_data_dir);
+}
 
 // Keep the symbol name exactly as expected by ART's libnativebridge loader.
 extern "C" android::NativeBridgeCallbacks NativeBridgeItf{
