@@ -131,6 +131,9 @@ PolicyEngine PolicyEngine::Load(std::string path) {
   if (root.isMember("default_backend")) {
     engine.default_selection_ =
         SelectionFromJson(root["default_backend"], "policy default");
+  } else if (root.isMember("preferred_backend")) {
+    engine.default_selection_ =
+        SelectionFromJson(root["preferred_backend"], "policy preferred backend");
   }
   const Json::Value packages = root["packages"];
   if (packages.isObject()) {

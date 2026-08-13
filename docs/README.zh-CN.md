@@ -25,9 +25,13 @@ Android 12 源码还需要三个 ART 配套补丁：
 
 ```json
 {
-  "default_backend": {
-    "mode": "auto",
-    "candidates": ["ndk", "houdini"]
+  "version": 1,
+  "preferred_backend": "houdini",
+  "abi": {
+    "public": {
+      "64": ["arm64-v8a"],
+      "32": ["armeabi-v7a", "armeabi"]
+    }
   },
   "packages": {
     "com.example.game": {
@@ -39,6 +43,11 @@ Android 12 源码还需要三个 ART 配套补丁：
   }
 }
 ```
+
+`preferred_backend` 是 `default_backend` 的别名；两者同时存在时以
+`default_backend` 为准。`abi.public` 控制应用通过 `Build.SUPPORTED_ABIS`
+看到的 ABI；PackageManager 等框架内部仍使用构建时的 loader ABI，因此不会
+把 x86 主机 ABI 从本地加载路径中移除。缺少 `abi.public` 时使用 ARM 兼容默认值。
 
 原有字符串规则继续兼容。对象规则用于保存候选顺序和可选的显式
 `selected_backend`；存在该字段时运行时只使用已选后端，Android 不会覆盖。

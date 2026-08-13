@@ -57,7 +57,7 @@ int main() {
   {
     std::ofstream policy(path, std::ios::trunc);
     policy << R"({
-      "default_backend": "ndk",
+      "preferred_backend": "ndk",
       "packages": {
         "com.example.game": {
           "mode": "auto",

@@ -28,9 +28,13 @@ not need access to the host file.
 
 ```json
 {
-  "default_backend": {
-    "mode": "auto",
-    "candidates": ["ndk", "houdini"]
+  "version": 1,
+  "preferred_backend": "houdini",
+  "abi": {
+    "public": {
+      "64": ["arm64-v8a"],
+      "32": ["armeabi-v7a", "armeabi"]
+    }
   },
   "packages": {
     "com.example.game": {
@@ -42,6 +46,12 @@ not need access to the host file.
   }
 }
 ```
+
+`preferred_backend` is an alias for `default_backend`; when both are present,
+`default_backend` wins. The `abi.public` lists are the ABI view exposed through
+`Build.SUPPORTED_ABIS` to applications. Framework package loading keeps its
+build-owned ABI list separately, so an x86 host ABI is not removed from the
+native loader path. Missing `abi.public` uses the ARM compatibility default.
 
 String rules remain supported. Object rules retain candidate order and an
 optional explicit `selected_backend`. Explicit selections are never overridden.
