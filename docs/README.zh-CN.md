@@ -33,11 +33,16 @@ Android 12 源码还需要三个 ART 配套补丁：
       "32": ["armeabi-v7a", "armeabi"]
     }
   },
+  "executables": {
+    "/vendor/bin/arm-helper": "ndk"
+  },
   "packages": {
     "com.example.game": {
       "mode": "auto",
       "candidates": ["houdini", "ndk"],
-      "selected_backend": "houdini"
+      "executables": {
+        "libzs-local.so": "houdini"
+      }
     },
     "com.example.game:remote": "ndk"
   }
@@ -53,13 +58,22 @@ Android 12 源码还需要三个 ART 配套补丁：
 原有字符串规则继续兼容。对象规则用于保存候选顺序和可选的显式
 `selected_backend`；存在该字段时运行时只使用已选后端，Android 不会覆盖。
 `auto` 规则由 Android 保存进程版本和候选结果。ARM 转译进程在启动后 60 秒内
-发生 native crash 时，Android 会切换到尚未失败的下一候选并恢复原任务；普通
-Java 崩溃、ANR、非 ARM 进程及窗口外崩溃不参与回退。每个候选在同一应用版本
-中只尝试一次，应用版本变化时重置该进程状态。
+发生 native crash 时，Android 会切换到尚未失败的下一候选。只有包含 Activity
+的前台主进程才恢复原任务；推送等 helper/service 进程只重启自身，不再销毁前台
+任务。普通 Java 崩溃、ANR、非 ARM 进程及窗口外崩溃不参与回退。每个候选在
+同一应用和系统版本中只尝试一次；后端通过 60 秒稳定窗口后会固定选择，避免把
+后续普通应用崩溃误判成转译失败。应用或系统版本变化时重置对应状态。
+
+顶层 `executables` 为系统级完整路径规则；包对象内的 `executables` 支持完整路径、
+文件名或 `*`，且包规则优先。Android 12 的镜像生成脚本会把 ARM32/ARM64
+`binfmt_misc` 注册统一指向 `/system/bin/floral_nativebridge_runner`，再由它按 ELF
+位数和规则执行 NDK 或 Houdini。无法从路径唯一确认包归属时不会套用其他包规则。
 
 可以通过只读属性覆盖后端路径：
 `ro.floral.nativebridge.ndk` 和 `ro.floral.nativebridge.houdini`。
 默认路径按 ABI 使用 `/system/lib64/` 或 `/system/lib/`。
+独立 ELF runner 路径分别由 `ro.floral.nativebridge.runner.ndk32`、`ndk64`、
+`houdini32` 和 `houdini64` 覆盖。
 
 路由器不会监看进程，后端初始化后也不会在进程内切换。应用生命周期、早期
 native crash 回退和任务恢复均由 Android 内部负责，不依赖宿主程序。运行状态

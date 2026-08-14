@@ -38,10 +38,16 @@ int main() {
     std::ofstream policy(path);
     policy << R"({
       "default_backend": "houdini",
+      "executables": {
+        "/vendor/bin/arm-helper": "ndk"
+      },
       "packages": {
         "com.example.game": {
           "mode": "auto",
-          "candidates": ["houdini", "ndk"]
+          "candidates": ["houdini", "ndk"],
+          "executables": {
+            "libzs-local.so": "houdini"
+          }
         },
         "com.example.game:remote": "houdini"
       }
@@ -53,6 +59,12 @@ int main() {
   const auto exact = engine.Select("com.example.game");
   const auto process = engine.Select("com.example.game:remote");
   const auto fallback = engine.Select("com.other.app");
+  const auto executable = engine.SelectExecutable(
+      "com.example.game", "/data/app/com.example.game-1/lib/arm64/libzs-local.so");
+  const auto path_only = engine.SelectExecutable(
+      "", "/data/app/com.example.game-1/lib/arm64/libzs-local.so");
+  const auto global_executable =
+      engine.SelectExecutable("", "/vendor/bin/arm-helper");
 
   {
     std::ofstream policy(path, std::ios::trunc);
@@ -77,7 +89,8 @@ int main() {
     state << R"({
       "version": 1,
       "packages": {
-        "com.example.game": {"selected_backend": "houdini"}
+        "com.example.game": {"selected_backend": "houdini"},
+        "com.exhausted.game": {"exhausted": true}
       }
     })";
   }
@@ -88,6 +101,8 @@ int main() {
   const auto recovered_process =
       floral::nativebridge::PolicyEngine::ApplyRuntimeState(
           exact, "com.example.game:worker", path);
+  const auto exhausted = floral::nativebridge::PolicyEngine::ApplyRuntimeState(
+      exact, "com.exhausted.game", path);
   unlink(path);
 
   const bool ok =
@@ -101,6 +116,12 @@ int main() {
             "process rule") &&
       Check(fallback.kind == floral::nativebridge::BackendKind::kHoudini,
             "default rule") &&
+      Check(executable.kind == floral::nativebridge::BackendKind::kHoudini,
+            "process executable rule") &&
+      Check(path_only.kind == floral::nativebridge::BackendKind::kHoudini,
+            "path executable rule") &&
+      Check(global_executable.kind == floral::nativebridge::BackendKind::kNdk,
+            "global executable rule") &&
       Check(refreshed.kind == floral::nativebridge::BackendKind::kHoudini &&
                 refreshed.candidates.size() == 1 &&
                 refreshed.candidates[0] == floral::nativebridge::BackendKind::kHoudini,
@@ -117,6 +138,8 @@ int main() {
                 locked.reason == "process rule",
             "explicit host rule remains locked") &&
       Check(recovered_process.kind == floral::nativebridge::BackendKind::kAuto,
-            "runtime state remains process-specific");
+            "runtime state remains process-specific") &&
+      Check(exhausted.exhausted && exhausted.candidates.empty(),
+            "runtime circuit breaker");
   return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

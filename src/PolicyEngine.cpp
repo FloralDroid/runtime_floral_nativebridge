@@ -7,6 +7,7 @@
 
 #include "floral/nativebridge/PolicyEngine.h"
 
+#include <algorithm>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -97,6 +98,33 @@ BackendSelection PreferredSelectionFromJson(const Json::Value &value,
   return selection;
 }
 
+std::string Basename(std::string_view path) {
+  const size_t separator = path.find_last_of('/');
+  return separator == std::string_view::npos
+             ? std::string(path)
+             : std::string(path.substr(separator + 1));
+}
+
+bool MatchesExecutable(std::string_view pattern, std::string_view path) {
+  return pattern == "*" || pattern == path || pattern == Basename(path);
+}
+
+bool PathBelongsToOwner(std::string_view path, std::string_view owner) {
+  if (owner.empty()) {
+    return true;
+  }
+  const size_t separator = owner.find(':');
+  if (separator != std::string_view::npos) {
+    owner = owner.substr(0, separator);
+  }
+  const std::string package_marker = "/" + std::string(owner);
+  if (path.find(package_marker + "/") != std::string_view::npos) {
+    return true;
+  }
+  // Installed APK directories append a generated suffix to the package name.
+  return path.find(package_marker + "-") != std::string_view::npos;
+}
+
 } // namespace
 
 const char *BackendKindName(BackendKind kind) {
@@ -158,12 +186,35 @@ PolicyEngine PolicyEngine::Load(std::string path) {
     engine.default_selection_ = PreferredSelectionFromJson(
         root["preferred_backend"], "policy preferred backend");
   }
+
+  const auto add_executable_rules = [&engine](const Json::Value &rules,
+                                               std::string owner) {
+    if (!rules.isObject()) {
+      return;
+    }
+    for (const std::string &pattern : rules.getMemberNames()) {
+      engine.executable_rules_.push_back({
+          owner,
+          pattern,
+          SelectionFromJson(rules[pattern], owner.empty()
+                                                ? "global executable rule"
+                                                : "executable rule"),
+      });
+    }
+  };
+  add_executable_rules(root["executables"], "");
+
   const Json::Value packages = root["packages"];
   if (packages.isObject()) {
     for (const std::string &process_name : packages.getMemberNames()) {
       engine.process_selections_.emplace(
           process_name,
           SelectionFromJson(packages[process_name], "process rule"));
+
+      const Json::Value &rule = packages[process_name];
+      if (rule.isObject()) {
+        add_executable_rules(rule["executables"], process_name);
+      }
     }
   }
   engine.loaded_ = true;
@@ -185,6 +236,56 @@ BackendSelection PolicyEngine::Select(std::string_view process_name) const {
     }
   }
   return default_selection_;
+}
+
+BackendSelection PolicyEngine::SelectExecutable(
+    std::string_view process_name, std::string_view executable_path) const {
+  if (executable_path.empty()) {
+    return Select(process_name);
+  }
+
+  const std::string package = [&process_name] {
+    const size_t separator = process_name.find(':');
+    return std::string(process_name.substr(0, separator));
+  }();
+
+  // Prefer an exact process rule, then the package rule. A path rule is only
+  // accepted when its package marker is present in the executable path.
+  for (const ExecutableRule &rule : executable_rules_) {
+    if (rule.owner.empty()) {
+      continue;
+    }
+    const bool process_match = rule.owner == process_name;
+    const bool package_match = rule.owner == package && !package.empty();
+    if ((!process_match && !package_match) ||
+        !MatchesExecutable(rule.pattern, executable_path) ||
+        !PathBelongsToOwner(executable_path, package_match ? package
+                                                            : rule.owner)) {
+      continue;
+    }
+    return rule.selection;
+  }
+
+  for (const ExecutableRule &rule : executable_rules_) {
+    if (rule.owner.empty() && MatchesExecutable(rule.pattern, executable_path)) {
+      return rule.selection;
+    }
+  }
+
+  // A binfmt dispatcher does not always retain the Android process name. If
+  // the path identifies exactly one configured executable rule, use it.
+  const ExecutableRule *path_match = nullptr;
+  for (const ExecutableRule &rule : executable_rules_) {
+    if (rule.owner.empty() || !MatchesExecutable(rule.pattern, executable_path) ||
+        !PathBelongsToOwner(executable_path, rule.owner)) {
+      continue;
+    }
+    if (path_match != nullptr) {
+      return Select(process_name);
+    }
+    path_match = &rule;
+  }
+  return path_match == nullptr ? Select(process_name) : path_match->selection;
 }
 
 BackendSelection PolicyEngine::ApplyRuntimeState(BackendSelection selection,
@@ -215,13 +316,34 @@ BackendSelection PolicyEngine::ApplyRuntimeState(BackendSelection selection,
     return selection;
   }
 
+  if (root["version"].isInt() && root["version"].asInt() > 2) {
+    LOG(WARNING) << "Unsupported Floral NativeBridge state version in " << path;
+    return selection;
+  }
+
   const Json::Value package = root["packages"][std::string(process_name)];
-  if (!package.isObject() || !package["selected_backend"].isString()) {
+  if (!package.isObject()) {
+    return selection;
+  }
+  if (package["exhausted"].asBool()) {
+    selection.exhausted = true;
+    selection.name = "exhausted";
+    selection.reason = "Android runtime circuit breaker";
+    selection.candidates.clear();
+    return selection;
+  }
+  if (!package["selected_backend"].isString()) {
     return selection;
   }
   const std::string backend = package["selected_backend"].asString();
   const BackendKind kind = ParseBackendKind(backend);
   if (kind == BackendKind::kAuto) {
+    return selection;
+  }
+  if (std::find(selection.candidates.begin(), selection.candidates.end(), kind) ==
+      selection.candidates.end()) {
+    LOG(WARNING) << "Ignoring stale Floral NativeBridge state backend " << backend
+                 << " for " << process_name;
     return selection;
   }
   selection.kind = kind;

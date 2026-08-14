@@ -44,6 +44,22 @@ cc_library_shared {
     min_sdk_version: "29",
 }
 
+// This binary is installed as the optional binfmt_misc interpreter. It
+// selects a backend before an app-owned ARM ELF is executed.
+cc_binary {
+    name: "floral_nativebridge_runner",
+    defaults: ["floral_nativebridge_defaults"],
+    srcs: [
+        "src/NativeBridgeRunner.cpp",
+        "src/PolicyEngine.cpp",
+    ],
+    shared_libs: [
+        "libbase",
+        "libjsoncpp",
+        "liblog",
+    ],
+}
+
 cc_test_host {
     name: "floral_nativebridge_policy_test",
     defaults: ["floral_nativebridge_defaults"],

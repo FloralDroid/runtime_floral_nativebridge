@@ -36,11 +36,16 @@ not need access to the host file.
       "32": ["armeabi-v7a", "armeabi"]
     }
   },
+  "executables": {
+    "/vendor/bin/arm-helper": "ndk"
+  },
   "packages": {
     "com.example.game": {
       "mode": "auto",
       "candidates": ["houdini", "ndk"],
-      "selected_backend": "houdini"
+      "executables": {
+        "libzs-local.so": "houdini"
+      }
     },
     "com.example.game:remote": "ndk"
   }
@@ -58,12 +63,26 @@ String rules remain supported. Object rules retain candidate order and an
 optional explicit `selected_backend`. Explicit selections are never overridden.
 For `auto`, Android records the process version and candidate results. A native
 crash in a translated ARM process within 60 seconds selects the next untried
-candidate and restores its task. Java crashes, ANRs, native processes, and later
-crashes are unaffected. Each candidate is attempted once per app version.
+candidate. Only a foreground main process restores its task; push and other
+helper/service processes restart independently and no longer tear down the
+foreground task. Java crashes, ANRs, native processes, and later crashes are
+unaffected. Each candidate is attempted once per application and system
+version. A backend that survives the 60-second probation window is kept, so a
+later ordinary application crash cannot poison the learned result.
+
+Top-level `executables` entries are system-wide full-path rules. Entries inside
+a package object accept a full path, basename, or `*`, and package rules take
+precedence. The Android 12 image generator routes ARM32 and ARM64
+`binfmt_misc` registrations through `/system/bin/floral_nativebridge_runner`,
+which inspects the ELF class and executes the configured NDK or Houdini runner.
+A package rule is not used when ownership cannot be determined uniquely from
+the executable path.
 
 Backend paths can be overridden with the read-only properties
 `ro.floral.nativebridge.ndk` and `ro.floral.nativebridge.houdini`. The default
 paths are architecture-aware `/system/lib64/...` or `/system/lib/...` paths.
+Standalone runner paths can be overridden with
+`ro.floral.nativebridge.runner.ndk32`, `ndk64`, `houdini32`, and `houdini64`.
 
 The router does not monitor processes or switch a backend inside a live process.
 Android itself owns early native-crash recovery and task restart without a host

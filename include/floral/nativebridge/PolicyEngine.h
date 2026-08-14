@@ -35,6 +35,13 @@ struct BackendSelection {
   std::string name = "auto";
   std::string reason = "default";
   std::vector<BackendKind> candidates;
+  bool exhausted = false;
+};
+
+struct ExecutableRule {
+  std::string owner;
+  std::string pattern;
+  BackendSelection selection;
 };
 
 class PolicyEngine {
@@ -45,6 +52,8 @@ public:
   static PolicyEngine Load(std::string path = kDefaultPath);
 
   BackendSelection Select(std::string_view process_name) const;
+  BackendSelection SelectExecutable(std::string_view process_name,
+                                    std::string_view executable_path) const;
 
   static BackendSelection ApplyRuntimeState(
       BackendSelection selection, std::string_view process_name,
@@ -57,6 +66,7 @@ private:
   std::string path_;
   BackendSelection default_selection_;
   std::unordered_map<std::string, BackendSelection> process_selections_;
+  std::vector<ExecutableRule> executable_rules_;
   bool loaded_ = false;
 };
 

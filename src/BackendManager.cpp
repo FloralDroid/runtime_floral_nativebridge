@@ -139,6 +139,10 @@ std::string BackendManager::BackendPath(BackendKind kind) const {
 }
 
 bool BackendManager::LoadSelectedBackend(const BackendSelection &selection) {
+  if (selection.exhausted) {
+    SetError("NativeBridge backend candidates exhausted by Android runtime state");
+    return false;
+  }
   const std::vector<BackendKind> default_candidates = {
       BackendKind::kNdk, BackendKind::kHoudini};
   const std::vector<BackendKind> &candidates = selection.candidates.empty()
