@@ -56,7 +56,7 @@ native loader path. Missing `abi.public` uses the ARM compatibility default.
 String rules remain supported. Object rules retain candidate order and an
 optional explicit `selected_backend`. Explicit selections are never overridden.
 For `auto`, Android records the process version and candidate results. A native
-crash in a translated ARM process within 15 seconds selects the next untried
+crash in a translated ARM process within 60 seconds selects the next untried
 candidate and restores its task. Java crashes, ANRs, native processes, and later
 crashes are unaffected. Each candidate is attempted once per app version.
 
