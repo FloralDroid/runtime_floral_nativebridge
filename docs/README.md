@@ -47,8 +47,9 @@ not need access to the host file.
 }
 ```
 
-`preferred_backend` is an alias for `default_backend`; when both are present,
-`default_backend` wins. The `abi.public` lists are the ABI view exposed through
+`preferred_backend` keeps automatic recovery enabled and places `ndk` or
+`houdini` first in the candidate list. `default_backend` remains an explicit
+default and wins when both fields are present. The `abi.public` lists are the ABI view exposed through
 `Build.SUPPORTED_ABIS` to applications. Framework package loading keeps its
 build-owned ABI list separately, so an x86 host ABI is not removed from the
 native loader path. Missing `abi.public` uses the ARM compatibility default.

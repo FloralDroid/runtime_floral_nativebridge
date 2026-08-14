@@ -44,8 +44,9 @@ Android 12 源码还需要三个 ART 配套补丁：
 }
 ```
 
-`preferred_backend` 是 `default_backend` 的别名；两者同时存在时以
-`default_backend` 为准。`abi.public` 控制应用通过 `Build.SUPPORTED_ABIS`
+`preferred_backend` 保持自动回退，并把指定的 `ndk` 或 `houdini` 放在候选首位；
+`default_backend` 仍表示显式默认后端，两者同时存在时以它为准。`abi.public`
+控制应用通过 `Build.SUPPORTED_ABIS`
 看到的 ABI；PackageManager 等框架内部仍使用构建时的 loader ABI，因此不会
 把 x86 主机 ABI 从本地加载路径中移除。缺少 `abi.public` 时使用 ARM 兼容默认值。
 

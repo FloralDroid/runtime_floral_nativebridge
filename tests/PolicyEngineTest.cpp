@@ -70,6 +70,7 @@ int main() {
   const floral::nativebridge::PolicyEngine reloaded =
       floral::nativebridge::PolicyEngine::Load(path);
   const auto refreshed = reloaded.Select("com.example.game");
+  const auto preferred = reloaded.Select("com.other.app");
 
   {
     std::ofstream state(path, std::ios::trunc);
@@ -104,6 +105,11 @@ int main() {
                 refreshed.candidates.size() == 1 &&
                 refreshed.candidates[0] == floral::nativebridge::BackendKind::kHoudini,
             "selected backend reload") &&
+      Check(preferred.kind == floral::nativebridge::BackendKind::kAuto &&
+                preferred.candidates.size() == 2 &&
+                preferred.candidates[0] == floral::nativebridge::BackendKind::kNdk &&
+                preferred.candidates[1] == floral::nativebridge::BackendKind::kHoudini,
+            "preferred backend keeps automatic fallback") &&
       Check(recovered.kind == floral::nativebridge::BackendKind::kHoudini &&
                 recovered.reason == "Android runtime state",
             "runtime recovery state") &&

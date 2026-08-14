@@ -74,6 +74,29 @@ BackendSelection SelectionFromJson(const Json::Value &value,
   return selection;
 }
 
+BackendSelection PreferredSelectionFromJson(const Json::Value &value,
+                                            std::string reason) {
+  BackendSelection selection{
+      .kind = BackendKind::kAuto,
+      .name = BackendKindName(BackendKind::kAuto),
+      .reason = std::move(reason),
+      .candidates = {BackendKind::kNdk, BackendKind::kHoudini},
+  };
+  if (!value.isString()) {
+    LOG(WARNING) << "Floral NativeBridge preferred_backend must be ndk or houdini";
+    return selection;
+  }
+
+  const BackendKind preferred = ParseBackendKind(value.asString());
+  if (preferred == BackendKind::kHoudini) {
+    selection.candidates = {BackendKind::kHoudini, BackendKind::kNdk};
+  } else if (preferred != BackendKind::kNdk) {
+    LOG(WARNING) << "Unknown Floral NativeBridge preferred backend '"
+                 << value.asString() << "'; using ndk first";
+  }
+  return selection;
+}
+
 } // namespace
 
 const char *BackendKindName(BackendKind kind) {
@@ -132,8 +155,8 @@ PolicyEngine PolicyEngine::Load(std::string path) {
     engine.default_selection_ =
         SelectionFromJson(root["default_backend"], "policy default");
   } else if (root.isMember("preferred_backend")) {
-    engine.default_selection_ =
-        SelectionFromJson(root["preferred_backend"], "policy preferred backend");
+    engine.default_selection_ = PreferredSelectionFromJson(
+        root["preferred_backend"], "policy preferred backend");
   }
   const Json::Value packages = root["packages"];
   if (packages.isObject()) {
