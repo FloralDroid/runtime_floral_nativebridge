@@ -97,10 +97,18 @@ selection no longer depends on an early `/proc/self/cmdline` value.
 
 The product fragment enables `ro.floral.nativebridge.hybrid_elf=1`. With the
 companion ART patch, a bridged classloader owns both native and bridged linker
-namespaces. Dynamically extracted x86/x86_64 ELF files loaded by absolute path
-use the native namespace; ARM/ARM64 files and paths whose ELF type cannot be
-read continue through the selected translation backend. A single ELF
-dependency graph still cannot mix architectures.
+namespaces. System-provided x86/x86_64 ELF files remain in the native namespace.
+Application-private native ELF files loaded by absolute path first use the
+selected translation backend and fall back to the native namespace when the
+backend rejects them; the returned handle records which owner must perform JNI
+and unload operations. ARM/ARM64 files and paths whose ELF type cannot be read
+continue through the selected translation backend. A single ELF dependency
+graph still cannot mix architectures.
+
+The framework integration reserves 256 MiB for 32-bit WebView RELRO creation
+by default. Products with an unusually large provider can override the byte
+counts with `ro.floral.webview.vmsize32` and
+`ro.floral.webview.vmsize64`; non-positive values fall back to the defaults.
 
 The router forwards the backend's ABI environment rather than changing global
 `ro.product.cpu.*` properties.

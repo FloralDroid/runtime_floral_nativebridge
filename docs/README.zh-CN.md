@@ -86,9 +86,15 @@ fork 之后；ART 在降权前明确传入 nice name 和应用数据目录，不
 `ro.product.cpu.*`。
 
 产品片段默认启用 `ro.floral.nativebridge.hybrid_elf=1`。配套 ART 补丁会为
-桥接 classloader 同时建立宿主和桥接 namespace；应用通过绝对路径加载动态
-解包的 x86/x86_64 ELF 时走宿主 namespace，ARM/ARM64 和无法直接识别的
+桥接 classloader 同时建立宿主和桥接 namespace；系统提供的 x86/x86_64 ELF
+仍直接走宿主 namespace。应用私有、通过绝对路径加载的原生 ELF 会先交给
+已选择的转译后端，后端拒绝时再回退到宿主 namespace；加载结果会记录真实
+句柄归属，确保 JNI 和卸载使用同一个所有者。ARM/ARM64 和无法直接识别的
 路径仍交给已选择的转译后端。该能力不会在同一个 ELF 依赖图中混合架构。
+
+框架集成默认给 32 位 WebView RELRO 创建预留 256 MiB 地址空间。使用超大
+WebView provider 的产品可以通过 `ro.floral.webview.vmsize32` 和
+`ro.floral.webview.vmsize64` 按字节覆盖；非正数会回退到默认值。
 
 ## 测试
 
