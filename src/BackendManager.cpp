@@ -26,6 +26,22 @@ constexpr char kInterfaceSymbol[] = "NativeBridgeItf";
 constexpr uint32_t kRequiredNativeBridgeVersion = 3;
 constexpr uint32_t kMaxNativeBridgeVersion = 6;
 
+extern "C" void __floral_nativebridge_set_guest_arch(int arch)
+    __attribute__((weak));
+
+enum FloralGuestArchitecture : int {
+  kFloralGuestArm = 1,
+  kFloralGuestArm64 = 2,
+};
+
+constexpr int GuestArchitecture() {
+#if defined(__LP64__)
+  return kFloralGuestArm64;
+#else
+  return kFloralGuestArm;
+#endif
+}
+
 bool HasRequiredCallbacks(const android::NativeBridgeCallbacks *callbacks) {
   return callbacks->initialize != nullptr &&
          callbacks->loadLibrary != nullptr &&
@@ -113,6 +129,15 @@ void BackendManager::ConfigureProcessContext(const char *process_name,
   }
   process_name_ = process_name == nullptr ? "" : process_name;
   package_name_ = PackageNameFromDataDir(app_data_dir);
+
+  // The router runs only for an ARM NativeBridge child. New Floral libc builds
+  // expose this private hook, while weak binding keeps the router loadable on an
+  // older system image during an incremental update.
+  if (__floral_nativebridge_set_guest_arch != nullptr) {
+    __floral_nativebridge_set_guest_arch(GuestArchitecture());
+  } else {
+    LOG(WARNING) << "Floral NativeBridge: libc guest identity hook unavailable";
+  }
 
   // This runs in the forked zygote child before dropping privileges. It can
   // safely read Android-owned 0600 state without exposing it to applications.
