@@ -1,5 +1,7 @@
 # Floral Mixed NativeBridge
 
+[简体中文](README.zh-CN.md)
+
 `libmixbridge.so` is a single Android NativeBridge entry point for x86 Android
 images that need to run ARM applications. It selects one backend per process
 and forwards the Android 12 NativeBridge v6 callbacks without placing
@@ -91,9 +93,11 @@ agent. Recovery state is written with `AtomicFile` to
 provide the NativeBridge v3 namespace interface used
 by Android 12. A failed load, interface check, or initialization is reported to
 ART, preventing two translation runtimes from sharing one process state.
-Policy and backend loading are deferred until after zygote fork. ART explicitly
-passes the nice name and app data directory before privileges are dropped, so
-selection no longer depends on an early `/proc/self/cmdline` value.
+The two configured backend DSOs are preloaded with `RTLD_NOW|RTLD_LOCAL` while
+the NativeBridge wrapper is opened by the zygote. ART then passes the nice name
+and app data directory after the fork; the child selects one preloaded backend
+and initializes only that backend. This preserves per-process selection without
+changing the backend loader/JNI constructor ordering.
 
 The product fragment enables `ro.floral.nativebridge.hybrid_elf=1`. With the
 companion ART patch, a bridged classloader owns both native and bridged linker
@@ -117,4 +121,5 @@ The router forwards the backend's ABI environment rather than changing global
 
 `floral_nativebridge_policy_test` validates policy precedence. The Android
 `floral_nativebridge_probe` only opens a library and checks its exported
-`NativeBridgeItf`; it never initializes two backends in one process.
+`NativeBridgeItf`; runtime loading additionally validates both configured
+backends before selecting one in a child process.

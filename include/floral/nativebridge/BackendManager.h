@@ -18,6 +18,7 @@
 #define FLORAL_NATIVEBRIDGE_BACKEND_MANAGER_H_
 
 #include <string>
+#include <vector>
 
 #include "nativebridge/native_bridge.h"
 
@@ -65,27 +66,40 @@ public:
   android::native_bridge_namespace_t *GetVendorNamespace() const;
   android::native_bridge_namespace_t *
   GetExportedNamespace(const char *name) const;
-  void PreZygoteFork() const;
+  void PreZygoteFork();
 
   BackendKind selected_kind() const { return selection_.kind; }
   const std::string &selected_path() const { return selected_path_; }
 
 private:
+  struct LoadedBackend {
+    BackendKind kind = BackendKind::kAuto;
+    std::string path;
+    void *handle = nullptr;
+    const android::NativeBridgeCallbacks *callbacks = nullptr;
+  };
+
   std::string ProcessName() const;
   static std::string PackageNameFromDataDir(const char *app_data_dir);
   std::string BackendPath(BackendKind kind) const;
+  bool PreloadBackends();
+  bool LoadBackend(BackendKind kind, const std::string &path);
+  const LoadedBackend *FindLoadedBackend(BackendKind kind) const;
+  bool IsBackendCompatible(const LoadedBackend &backend,
+                           uint32_t bridge_version) const;
   bool LoadSelectedBackend(const BackendSelection &selection);
   void SetError(std::string message) const;
 
   std::string policy_path_;
   std::string process_name_;
   std::string package_name_;
-  void *backend_handle_ = nullptr;
+  std::vector<LoadedBackend> loaded_backends_;
   const android::NativeBridgeCallbacks *callbacks_ = nullptr;
   BackendSelection selection_;
   std::string selected_path_;
   mutable std::string last_error_;
   bool selection_prepared_ = false;
+  bool backends_preloaded_ = false;
   bool initialized_ = false;
 };
 

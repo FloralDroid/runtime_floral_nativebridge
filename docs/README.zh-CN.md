@@ -1,5 +1,7 @@
 # Floral 聚合 NativeBridge
 
+[English](README.md)
+
 `libmixbridge.so` 是 x86 Android 镜像使用的单一 NativeBridge 入口，负责
 在每个进程内选择一个 ARM 转译后端，并转发 Android 12 NativeBridge v6 回调。
 NDK Translation 和 Houdini 二进制不放入本仓库。
@@ -80,9 +82,10 @@ native crash 回退和任务恢复均由 Android 内部负责，不依赖宿主�
 通过 `AtomicFile` 写入 `/data/system/floral/nativebridge-state.json`，不使用
 SQLite。后端必须提供 Android 12 使用的
 NativeBridge v3 namespace 接口；加载、接口检查或初始化失败会直接报告给
-ART，避免两个转译运行时共享进程状态。策略读取和后端加载都会延迟到 zygote
-fork 之后；ART 在降权前明确传入 nice name 和应用数据目录，不再依赖初始化
-阶段的 `/proc/self/cmdline`。ABI 环境沿用后端返回值，不修改全局
+ART，避免两个转译运行时共享进程状态。NativeBridge wrapper 在 zygote 打开时
+会用 `RTLD_NOW|RTLD_LOCAL` 预加载两个已配置的后端 DSO。fork 后 ART 在降权前
+明确传入 nice name 和应用数据目录，子进程只选择并初始化其中一个已加载后端，
+不再改变后端 loader/JNI 构造函数的启动顺序。ABI 环境沿用后端返回值，不修改全局
 `ro.product.cpu.*`。
 
 产品片段默认启用 `ro.floral.nativebridge.hybrid_elf=1`。配套 ART 补丁会为
@@ -99,5 +102,5 @@ WebView provider 的产品可以通过 `ro.floral.webview.vmsize32` 和
 ## 测试
 
 `floral_nativebridge_policy_test` 检查策略优先级；Android 目标
-`floral_nativebridge_probe` 只打开库并检查 `NativeBridgeItf` 导出，不会在
-一个进程内初始化两个后端。
+`floral_nativebridge_probe` 只打开库并检查 `NativeBridgeItf` 导出；实际运行时
+会先校验两个已配置后端，再在子进程中选择一个初始化。
