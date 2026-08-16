@@ -71,8 +71,12 @@ public:
 
   BackendKind selected_kind() const { return selection_.kind; }
   LoaderMode selected_loader_mode() const { return selection_.loader_mode; }
+  bool UseDirectLoader() const {
+    return selection_.loader_mode == LoaderMode::kDirect;
+  }
+  // Kept for older integrations while the public mode is renamed to direct.
   bool UseCompatibilityLoader() const {
-    return selection_.loader_mode == LoaderMode::kCompat;
+    return UseDirectLoader();
   }
   const std::string &selected_path() const { return selected_path_; }
 

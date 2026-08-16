@@ -112,7 +112,7 @@ int main() {
       Check(exact.candidates.size() == 4 &&
                 exact.candidates[0].backend == floral::nativebridge::BackendKind::kHoudini &&
                 exact.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid &&
-                exact.candidates[1].mode == floral::nativebridge::LoaderMode::kCompat,
+                exact.candidates[1].mode == floral::nativebridge::LoaderMode::kDirect,
             "candidate order") &&
       Check(process.kind == floral::nativebridge::BackendKind::kHoudini,
             "process rule") &&
@@ -134,7 +134,7 @@ int main() {
                 preferred.candidates[0].backend == floral::nativebridge::BackendKind::kNdk &&
                 preferred.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid &&
                 preferred.candidates[1].backend == floral::nativebridge::BackendKind::kNdk &&
-                preferred.candidates[1].mode == floral::nativebridge::LoaderMode::kCompat &&
+                preferred.candidates[1].mode == floral::nativebridge::LoaderMode::kDirect &&
                 preferred.candidates[2].backend == floral::nativebridge::BackendKind::kHoudini,
             "preferred backend keeps automatic fallback") &&
       Check(recovered.kind == floral::nativebridge::BackendKind::kHoudini &&

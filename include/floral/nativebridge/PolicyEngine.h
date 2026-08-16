@@ -30,12 +30,13 @@ enum class BackendKind {
   kHoudini,
 };
 
-// Hybrid keeps the existing machine-based split. Compat gives the selected
-// backend ownership of app-private ELF loading and only uses the host linker
-// as an explicit fallback when that backend rejects the library.
+// Hybrid keeps the existing machine-based split. Direct gives the selected
+// backend ownership of every bridged ELF load without a host-linker fallback.
 enum class LoaderMode {
   kHybrid,
-  kCompat,
+  kDirect,
+  // Kept as a source compatibility alias for older callers.
+  kCompat = kDirect,
 };
 
 struct BackendCandidate {

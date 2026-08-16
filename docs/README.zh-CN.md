@@ -49,8 +49,9 @@ native 和 JNI 加载失败。
 ```
 
 `preferred_backend` 保持自动回退，并把指定的 `ndk` 或 `houdini` 放在候选首位；
-每个后端内部依次包含 `hybrid`、`compat` 两种候选。`compat` 会先把应用私有
-原生 ELF 交给选定转译后端，只有后端拒绝时才交给宿主 linker。`default_backend`
+每个后端内部依次包含 `hybrid`、`direct` 两种候选。`direct` 会把所有桥接
+ELF 交给选定转译后端，后端拒绝时直接向 ART 返回失败，不再交给宿主 linker。
+`default_backend`
 仍表示显式默认后端，两者同时存在时以它为准。`abi.public`
 控制应用通过 `Build.SUPPORTED_ABIS`
 看到的 ABI；PackageManager 等框架内部仍使用构建时的 loader ABI，因此不会
@@ -90,10 +91,10 @@ fork 之后；ART 在降权前明确传入 nice name 和应用数据目录，不
 产品片段默认启用 `ro.floral.nativebridge.hybrid_elf=1`。配套 ART 补丁会为
 桥接 classloader 同时建立宿主和桥接 namespace；系统提供的 x86/x86_64 ELF
 在 `hybrid` 模式下，系统提供的 x86/x86_64 ELF 和应用私有 native ELF 保持
-宿主优先；`compat` 模式仍让系统路径由宿主负责，但应用私有 native ELF 先交给
-已选择的转译后端，后端拒绝时再回退到宿主 namespace。加载结果会记录真实句柄
-归属，确保 JNI 和卸载使用同一个所有者。ARM/ARM64 和无法直接识别的路径仍交给
-已选择的转译后端。该能力不会在同一个 ELF 依赖图中混合架构。
+宿主优先；`direct` 模式只建立桥接 namespace，所有加载都交给已选择的转译后端，
+失败直接返回 ART，不回退到宿主 namespace。加载结果会记录真实句柄归属，确保
+JNI 和卸载使用同一个所有者。ARM/ARM64 和无法直接识别的路径仍交给已选择的
+转译后端。该能力不会在同一个 ELF 依赖图中混合架构。
 
 框架集成默认给 32 位 WebView RELRO 创建预留 256 MiB 地址空间。使用超大
 WebView provider 的产品可以通过 `ro.floral.webview.vmsize32` 和

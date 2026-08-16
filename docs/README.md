@@ -13,7 +13,7 @@ The Android 12 source tree also needs the companion ART patch set under
 `redroid-patches/android-12.0.0_r32/art/`. It exposes the ART callback header,
 routes native ELF files from a bridged classloader, passes the real process
 identity before the zygote child drops privileges, exposes the per-process
-compatibility loader mode, and provides package-scoped JNI loading diagnostics.
+direct loader mode, and provides package-scoped JNI loading diagnostics.
 A companion frameworks/base patch persists selection and handles early native
 and JNI-loader failures.
 
@@ -55,9 +55,9 @@ not need access to the host file.
 
 `preferred_backend` keeps automatic recovery enabled and places `ndk` or
 `houdini` first in the candidate list. Each backend contributes two internal
-candidates in order: `hybrid`, then `compat`. `compat` gives the selected
-backend first ownership of app-private native ELF and only falls back to the
-host linker when that backend rejects the library. `default_backend` remains an
+candidates in order: `hybrid`, then `direct`. `direct` gives the selected
+backend ownership of every bridged ELF load without falling back to the host
+linker. `default_backend` remains an
 explicit default and wins when both fields are present. The `abi.public` lists are the ABI view exposed through
 `Build.SUPPORTED_ABIS` to applications. Framework package loading keeps its
 build-owned ABI list separately, so an x86 host ABI is not removed from the
@@ -105,12 +105,12 @@ companion ART patch, a bridged classloader owns both native and bridged linker
 namespaces. System-provided x86/x86_64 ELF files remain in the native namespace.
 In `hybrid` mode, system-provided x86/x86_64 ELF files remain in the native
 namespace and app-private native ELF follows the existing host-first routing. In
-`compat` mode, platform paths remain host-owned, while app-private native ELF
-first uses the selected translation backend and falls back to the native
-namespace only when that backend rejects the library. The returned handle
-records which owner must perform JNI and unload operations. ARM/ARM64 files and
-paths whose ELF type cannot be read continue through the selected translation
-backend. A single ELF dependency graph still cannot mix architectures.
+`direct` mode, the bridged namespace owns all loads and a backend rejection is
+returned directly to ART; the native namespace is not used as a fallback. The
+returned handle records which owner must perform JNI and unload operations.
+ARM/ARM64 files and paths whose ELF type cannot be read continue through the
+selected translation backend. A single ELF dependency graph still cannot mix
+architectures.
 
 The framework integration reserves 256 MiB for 32-bit WebView RELRO creation
 by default. Products with an unusually large provider can override the byte

@@ -27,7 +27,7 @@ std::vector<BackendCandidate> ExpandCandidates(
       continue;
     }
     candidates.push_back({backend, LoaderMode::kHybrid});
-    candidates.push_back({backend, LoaderMode::kCompat});
+    candidates.push_back({backend, LoaderMode::kDirect});
   }
   return candidates;
 }
@@ -160,14 +160,16 @@ const char *LoaderModeName(LoaderMode mode) {
   switch (mode) {
   case LoaderMode::kHybrid:
     return "hybrid";
-  case LoaderMode::kCompat:
-    return "compat";
+  case LoaderMode::kDirect:
+    return "direct";
   }
   return "hybrid";
 }
 
 LoaderMode ParseLoaderMode(std::string_view value) {
-  return value == "compat" ? LoaderMode::kCompat : LoaderMode::kHybrid;
+  // "compat" was the name used by the first persisted state format.
+  return value == "direct" || value == "compat" ? LoaderMode::kDirect
+                                                  : LoaderMode::kHybrid;
 }
 
 std::string BackendCandidateName(const BackendCandidate &candidate) {

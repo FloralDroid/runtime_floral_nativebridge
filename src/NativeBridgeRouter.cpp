@@ -95,7 +95,9 @@ android::native_bridge_namespace_t *GetExportedNamespace(const char *name) {
 
 void PreZygoteFork() { Manager().PreZygoteFork(); }
 
-bool UseCompatibilityLoader() { return Manager().UseCompatibilityLoader(); }
+bool UseDirectLoader() { return Manager().UseDirectLoader(); }
+
+bool UseCompatibilityLoader() { return UseDirectLoader(); }
 
 } // namespace
 } // namespace floral::nativebridge
@@ -107,8 +109,12 @@ extern "C" void FloralNativeBridgeSetProcessContext(const char *process_name,
   floral::nativebridge::ConfigureProcessContext(process_name, app_data_dir);
 }
 
-// ART uses this per-process bit to choose the loader order for app-private
-// mixed ELF libraries. Unknown or legacy routers conservatively stay hybrid.
+// ART uses this per-process bit to select the bridged-only direct loader.
+extern "C" bool FloralNativeBridgeUseDirectLoader() {
+  return floral::nativebridge::UseDirectLoader();
+}
+
+// Preserve the old extension symbol for an incremental image update.
 extern "C" bool FloralNativeBridgeUseCompatibilityLoader() {
   return floral::nativebridge::UseCompatibilityLoader();
 }
