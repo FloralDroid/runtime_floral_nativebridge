@@ -11,12 +11,14 @@ Include `system/floral/nativebridge/nativebridge.mk` from an x86 Floral device
 product to install the library and set `ro.dalvik.vm.native.bridge` to
 `libmixbridge.so`. ARM-only products must not include that product fragment.
 
-The Android 12 source tree also needs three companion ART patches,
+The Android 12 source tree also needs five companion ART patches,
 `redroid-patches/android-12.0.0_r32/art/0001-expose-nativebridge-headers-to-floral.patch`
-through `0003-pass-Floral-NativeBridge-process-context.patch`. They expose the ART
-callback header, route native ELF files from a bridged classloader, and pass the
-real process identity before the zygote child drops privileges. A companion
-frameworks/base patch persists selection and handles early native crashes.
+through `0005-add-scoped-Floral-NativeBridge-diagnostics.patch`. They expose the ART
+callback header, route native ELF files from a bridged classloader, pass the
+real process identity before the zygote child drops privileges, retain the
+correct owner for app-private mixed-ELF handles, and provide package-scoped JNI
+loading diagnostics. A companion frameworks/base patch
+persists selection and handles early native crashes.
 
 ## Policy
 
@@ -117,9 +119,38 @@ counts with `ro.floral.webview.vmsize32` and
 The router forwards the backend's ABI environment rather than changing global
 `ro.product.cpu.*` properties.
 
+## Diagnostics
+
+Unified diagnostics are disabled by default. A full package name is required;
+the optional library filter accepts either a full path or a basename. The
+package filter also covers child processes such as `:remote`. These `debug.*`
+properties do not survive a reboot.
+
+```shell
+adb shell setprop debug.floral.nbdiag.package com.example.app
+adb shell setprop debug.floral.nbdiag.library libsample.so
+adb logcat -s FloralNBDiag
+```
+
+Events cover backend selection and initialization, `loadLibrary` and
+`loadLibraryExt`, trampolines, the `JNI_OnLoad` result, and every method passed
+to `RegisterNatives`. Clear the package property to stop tracing immediately:
+
+```shell
+adb shell setprop debug.floral.nbdiag.package ''
+adb shell setprop debug.floral.nbdiag.library ''
+```
+
+`RegisterNatives` normally runs on the `JNI_OnLoad` thread and retains its
+library attribution. A protected loader that registers from another thread is
+reported with an `<unknown>` library while the package filter still captures
+the registration.
+
 ## Checks
 
-`floral_nativebridge_policy_test` validates policy precedence. The Android
+`floral_nativebridge_policy_test` validates policy precedence and
+`floral_nativebridge_diagnostics_test` validates package and library filters.
+The Android
 `floral_nativebridge_probe` only opens a library and checks its exported
 `NativeBridgeItf`; runtime loading additionally validates both configured
 backends before selecting one in a child process.

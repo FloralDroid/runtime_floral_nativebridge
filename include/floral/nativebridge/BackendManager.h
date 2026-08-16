@@ -17,7 +17,9 @@
 #ifndef FLORAL_NATIVEBRIDGE_BACKEND_MANAGER_H_
 #define FLORAL_NATIVEBRIDGE_BACKEND_MANAGER_H_
 
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "nativebridge/native_bridge.h"
@@ -88,6 +90,9 @@ private:
   bool IsBackendCompatible(const LoadedBackend &backend,
                            uint32_t bridge_version) const;
   bool LoadSelectedBackend(const BackendSelection &selection);
+  void RememberLibrary(void *handle, const char *path) const;
+  void ForgetLibrary(void *handle) const;
+  std::string LibraryPath(void *handle) const;
   void SetError(std::string message) const;
 
   std::string policy_path_;
@@ -97,6 +102,8 @@ private:
   const android::NativeBridgeCallbacks *callbacks_ = nullptr;
   BackendSelection selection_;
   std::string selected_path_;
+  mutable std::mutex library_mutex_;
+  mutable std::unordered_map<void *, std::string> library_paths_;
   mutable std::string last_error_;
   bool selection_prepared_ = false;
   bool backends_preloaded_ = false;

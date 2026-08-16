@@ -18,6 +18,7 @@
 
 #include <android-base/logging.h>
 #include <android-base/properties.h>
+#include <nativebridge/native_bridge_diagnostics.h>
 
 namespace floral::nativebridge {
 namespace {
@@ -131,6 +132,28 @@ const char *BackendManager::GetError() const {
 }
 
 std::string BackendManager::ProcessName() const { return ReadProcessName(); }
+
+void BackendManager::RememberLibrary(void *handle, const char *path) const {
+  if (handle == nullptr || path == nullptr || *path == '\0') {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(library_mutex_);
+  library_paths_[handle] = path;
+}
+
+void BackendManager::ForgetLibrary(void *handle) const {
+  if (handle == nullptr) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(library_mutex_);
+  library_paths_.erase(handle);
+}
+
+std::string BackendManager::LibraryPath(void *handle) const {
+  std::lock_guard<std::mutex> lock(library_mutex_);
+  const auto library = library_paths_.find(handle);
+  return library == library_paths_.end() ? std::string() : library->second;
+}
 
 std::string BackendManager::PackageNameFromDataDir(const char *app_data_dir) {
   if (app_data_dir == nullptr || *app_data_dir == '\0') {
@@ -287,6 +310,27 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection) {
     LOG(INFO) << "Selected " << selection_.name << " NativeBridge backend from "
               << selected_path_ << " (interface v" << callbacks_->version
               << ")";
+    const std::string &diagnostic_process =
+        process_name_.empty() ? package_name_ : process_name_;
+    if (android::native_bridge_diagnostics::ShouldTraceProcess(
+            diagnostic_process.c_str())) {
+      Dl_info callback_info = {};
+      const char *callback_owner =
+          dladdr(reinterpret_cast<void *>(callbacks_->loadLibrary),
+                 &callback_info) != 0
+              ? callback_info.dli_fname
+              : nullptr;
+      android::native_bridge_diagnostics::Trace(
+          "stage=backend_selected process=%s package=%s backend=%s path=%s "
+          "backend_handle=%p callbacks=%p load_callback=%p callback_owner=%s "
+          "version=%u",
+          diagnostic_process.c_str(), package_name_.c_str(),
+          selection_.name.c_str(), selected_path_.c_str(), backend->handle,
+          const_cast<void *>(static_cast<const void *>(callbacks_)),
+          reinterpret_cast<void *>(callbacks_->loadLibrary),
+          callback_owner == nullptr ? "<unknown>" : callback_owner,
+          callbacks_->version);
+    }
     return true;
   }
 
@@ -316,12 +360,35 @@ bool BackendManager::Initialize(
   if (!EnsureLoaded() || callbacks_->initialize == nullptr) {
     return false;
   }
+  const std::string &diagnostic_process =
+      process_name_.empty() ? package_name_ : process_name_;
+  const bool trace = android::native_bridge_diagnostics::ShouldTraceProcess(
+      diagnostic_process.c_str());
+  if (trace) {
+    android::native_bridge_diagnostics::Trace(
+        "stage=backend_initialize_begin process=%s backend=%s private_dir=%s "
+        "instruction_set=%s",
+        diagnostic_process.c_str(), selection_.name.c_str(),
+        private_dir == nullptr ? "<null>" : private_dir,
+        instruction_set == nullptr ? "<null>" : instruction_set);
+  }
   if (!callbacks_->initialize(runtime_callbacks, private_dir,
                               instruction_set)) {
     SetError("selected backend initialization failed");
+    if (trace) {
+      android::native_bridge_diagnostics::Trace(
+          "stage=backend_initialize_end process=%s backend=%s result=error "
+          "error=%s",
+          diagnostic_process.c_str(), selection_.name.c_str(), GetError());
+    }
     return false;
   }
   initialized_ = true;
+  if (trace) {
+    android::native_bridge_diagnostics::Trace(
+        "stage=backend_initialize_end process=%s backend=%s result=ok",
+        diagnostic_process.c_str(), selection_.name.c_str());
+  }
   return true;
 }
 
@@ -346,16 +413,49 @@ bool BackendManager::IsCompatibleWith(uint32_t bridge_version) {
 }
 
 void *BackendManager::LoadLibrary(const char *path, int flags) const {
-  return callbacks_ != nullptr && callbacks_->loadLibrary != nullptr
-             ? callbacks_->loadLibrary(path, flags)
-             : nullptr;
+  void *handle = callbacks_ != nullptr && callbacks_->loadLibrary != nullptr
+                     ? callbacks_->loadLibrary(path, flags)
+                     : nullptr;
+  RememberLibrary(handle, path);
+  const std::string &diagnostic_process =
+      process_name_.empty() ? package_name_ : process_name_;
+  if (android::native_bridge_diagnostics::ShouldTraceLibrary(
+          diagnostic_process.c_str(), path)) {
+    android::native_bridge_diagnostics::Trace(
+        "stage=backend_load_library process=%s backend=%s path=%s flags=0x%x "
+        "handle=%p error=%s",
+        diagnostic_process.c_str(), selection_.name.c_str(),
+        path == nullptr ? "<null>" : path, flags, handle,
+        handle == nullptr ? GetError() : "<none>");
+  }
+  return handle;
 }
 
 void *BackendManager::GetTrampoline(void *handle, const char *name,
                                     const char *shorty, uint32_t len) const {
-  return callbacks_ != nullptr && callbacks_->getTrampoline != nullptr
-             ? callbacks_->getTrampoline(handle, name, shorty, len)
-             : nullptr;
+  void *symbol = callbacks_ != nullptr && callbacks_->getTrampoline != nullptr
+                     ? callbacks_->getTrampoline(handle, name, shorty, len)
+                     : nullptr;
+  const std::string path = LibraryPath(handle);
+  const std::string &diagnostic_process =
+      process_name_.empty() ? package_name_ : process_name_;
+  if (android::native_bridge_diagnostics::ShouldTraceLibrary(
+          diagnostic_process.c_str(), path.empty() ? nullptr : path.c_str())) {
+    Dl_info symbol_info = {};
+    const char *owner = symbol != nullptr && dladdr(symbol, &symbol_info) != 0
+                            ? symbol_info.dli_fname
+                            : nullptr;
+    android::native_bridge_diagnostics::Trace(
+        "stage=backend_get_trampoline process=%s backend=%s path=%s handle=%p "
+        "symbol=%s shorty=%s length=%u result=%p owner=%s error=%s",
+        diagnostic_process.c_str(), selection_.name.c_str(),
+        path.empty() ? "<unknown>" : path.c_str(), handle,
+        name == nullptr ? "<null>" : name,
+        shorty == nullptr ? "<null>" : shorty, len, symbol,
+        owner == nullptr ? "<unknown>" : owner,
+        symbol == nullptr ? GetError() : "<none>");
+  }
+  return symbol;
 }
 
 bool BackendManager::IsSupported(const char *path) const {
@@ -378,9 +478,14 @@ BackendManager::GetSignalHandler(int signal) const {
 }
 
 int BackendManager::UnloadLibrary(void *handle) const {
-  return callbacks_ != nullptr && callbacks_->unloadLibrary != nullptr
-             ? callbacks_->unloadLibrary(handle)
-             : -1;
+  const int result =
+      callbacks_ != nullptr && callbacks_->unloadLibrary != nullptr
+          ? callbacks_->unloadLibrary(handle)
+          : -1;
+  if (result == 0) {
+    ForgetLibrary(handle);
+  }
+  return result;
 }
 
 bool BackendManager::IsPathSupported(const char *path) const {
@@ -418,9 +523,23 @@ bool BackendManager::LinkNamespaces(android::native_bridge_namespace_t *from,
 void *
 BackendManager::LoadLibraryExt(const char *path, int flags,
                                android::native_bridge_namespace_t *ns) const {
-  return callbacks_ != nullptr && callbacks_->loadLibraryExt != nullptr
-             ? callbacks_->loadLibraryExt(path, flags, ns)
-             : nullptr;
+  void *handle = callbacks_ != nullptr && callbacks_->loadLibraryExt != nullptr
+                     ? callbacks_->loadLibraryExt(path, flags, ns)
+                     : nullptr;
+  RememberLibrary(handle, path);
+  const std::string &diagnostic_process =
+      process_name_.empty() ? package_name_ : process_name_;
+  if (android::native_bridge_diagnostics::ShouldTraceLibrary(
+          diagnostic_process.c_str(), path)) {
+    android::native_bridge_diagnostics::Trace(
+        "stage=backend_load_library_ext process=%s backend=%s path=%s "
+        "flags=0x%x "
+        "namespace=%p handle=%p error=%s",
+        diagnostic_process.c_str(), selection_.name.c_str(),
+        path == nullptr ? "<null>" : path, flags, static_cast<void *>(ns), handle,
+        handle == nullptr ? GetError() : "<none>");
+  }
+  return handle;
 }
 
 android::native_bridge_namespace_t *BackendManager::GetVendorNamespace() const {

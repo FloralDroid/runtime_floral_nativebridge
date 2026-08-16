@@ -10,12 +10,15 @@ x86 Floral 产品应继承 `system/floral/nativebridge/nativebridge.mk`，由产
 片段安装库并设置 `ro.dalvik.vm.native.bridge=libmixbridge.so`；纯 ARM 产品
 不要继承该片段。
 
-Android 12 源码还需要三个 ART 配套补丁：
+Android 12 源码还需要五个 ART 配套补丁：
 `redroid-patches/android-12.0.0_r32/art/0001-expose-nativebridge-headers-to-floral.patch`，
-`0002-support-hybrid-nativebridge-elf-loading.patch` 和
-`0003-pass-Floral-NativeBridge-process-context.patch`。它们分别开放 ART 回调头文件、
-让桥接 classloader 按 ELF 架构选择 namespace，并在 zygote 降权前传入真实进程
-身份。frameworks/base 配套补丁负责保存选择和处理早期 native crash。
+`0002-support-hybrid-nativebridge-elf-loading.patch`、
+`0003-pass-Floral-NativeBridge-process-context.patch`、
+`0004-keep-app-private-mixed-ELF-in-NativeBridge.patch` 和
+`0005-add-scoped-Floral-NativeBridge-diagnostics.patch`。它们分别开放 ART 回调头文件、
+让桥接 classloader 按 ELF 架构选择 namespace、在 zygote 降权前传入真实进程
+身份、保持应用私有混合 ELF 的句柄归属，并提供受包名约束的 JNI 加载诊断。frameworks/base 配套补丁负责保存选择和
+处理早期 native crash。
 
 ## 策略文件
 
@@ -99,8 +102,31 @@ ART，避免两个转译运行时共享进程状态。NativeBridge wrapper 在 z
 WebView provider 的产品可以通过 `ro.floral.webview.vmsize32` 和
 `ro.floral.webview.vmsize64` 按字节覆盖；非正数会回退到默认值。
 
+## 诊断
+
+统一诊断默认关闭。必须先指定完整包名；可选 SO 过滤接受完整路径或文件名，
+包名会同时匹配该包的 `:remote` 等子进程。`debug.*` 属性不会持久化到重启后。
+
+```shell
+adb shell setprop debug.floral.nbdiag.package com.example.app
+adb shell setprop debug.floral.nbdiag.library libsample.so
+adb logcat -s FloralNBDiag
+```
+
+日志按顺序覆盖后端选择和初始化、`loadLibrary`/`loadLibraryExt`、trampoline、
+`JNI_OnLoad` 返回值以及 `RegisterNatives` 的方法表和结果。清空包名立即关闭诊断：
+
+```shell
+adb shell setprop debug.floral.nbdiag.package ''
+adb shell setprop debug.floral.nbdiag.library ''
+```
+
+`RegisterNatives` 通常在 `JNI_OnLoad` 线程中执行，因此日志可以标明所属 SO；若保护
+壳在其他线程延迟注册，所属 SO 显示为 `<unknown>`，但包级过滤仍会保留注册记录。
+
 ## 测试
 
-`floral_nativebridge_policy_test` 检查策略优先级；Android 目标
+`floral_nativebridge_policy_test` 检查策略优先级，
+`floral_nativebridge_diagnostics_test` 检查包和 SO 过滤；Android 目标
 `floral_nativebridge_probe` 只打开库并检查 `NativeBridgeItf` 导出；实际运行时
 会先校验两个已配置后端，再在子进程中选择一个初始化。

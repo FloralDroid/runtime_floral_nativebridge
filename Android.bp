@@ -71,6 +71,13 @@ cc_test_host {
 }
 
 cc_test_host {
+    name: "floral_nativebridge_diagnostics_test",
+    defaults: ["floral_nativebridge_defaults"],
+    srcs: ["tests/DiagnosticsTest.cpp"],
+    header_libs: ["libnativebridge-headers"],
+}
+
+cc_test_host {
     name: "floral_nativebridge_probe",
     srcs: ["tests/NativeBridgeProbe.cpp"],
     cflags: [
