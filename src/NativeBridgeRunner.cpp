@@ -158,12 +158,18 @@ int main(int argc, char **argv) {
   const floral::nativebridge::PolicyEngine policy =
       floral::nativebridge::PolicyEngine::Load(PolicyPath());
   const auto selection = policy.SelectExecutable("", argv[elf_index]);
-  for (const auto backend : selection.candidates) {
-    if (backend == floral::nativebridge::BackendKind::kAuto) {
+  floral::nativebridge::BackendKind last_backend =
+      floral::nativebridge::BackendKind::kAuto;
+  for (const auto candidate : selection.candidates) {
+    // Loader mode only changes app namespace ownership inside ART. Standalone
+    // ELF runners should try each backend once in policy order.
+    if (candidate.backend == floral::nativebridge::BackendKind::kAuto ||
+        candidate.backend == last_backend) {
       continue;
     }
-    ExecBackend(RunnerPath(backend, elf_class), argc, argv,
-                floral::nativebridge::BackendKindName(backend));
+    last_backend = candidate.backend;
+    ExecBackend(RunnerPath(candidate.backend, elf_class), argc, argv,
+                floral::nativebridge::BackendKindName(candidate.backend));
   }
 
   LOG(ERROR) << "No usable Floral NativeBridge executable backend for "

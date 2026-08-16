@@ -11,14 +11,13 @@ Include `system/floral/nativebridge/nativebridge.mk` from an x86 Floral device
 product to install the library and set `ro.dalvik.vm.native.bridge` to
 `libmixbridge.so`. ARM-only products must not include that product fragment.
 
-The Android 12 source tree also needs five companion ART patches,
-`redroid-patches/android-12.0.0_r32/art/0001-expose-nativebridge-headers-to-floral.patch`
-through `0005-add-scoped-Floral-NativeBridge-diagnostics.patch`. They expose the ART
-callback header, route native ELF files from a bridged classloader, pass the
-real process identity before the zygote child drops privileges, retain the
-correct owner for app-private mixed-ELF handles, and provide package-scoped JNI
-loading diagnostics. A companion frameworks/base patch
-persists selection and handles early native crashes.
+The Android 12 source tree also needs the companion ART patch set under
+`redroid-patches/android-12.0.0_r32/art/`. It exposes the ART callback header,
+routes native ELF files from a bridged classloader, passes the real process
+identity before the zygote child drops privileges, exposes the per-process
+compatibility loader mode, and provides package-scoped JNI loading diagnostics.
+A companion frameworks/base patch persists selection and handles early native
+and JNI-loader failures.
 
 ## Policy
 
@@ -57,8 +56,11 @@ not need access to the host file.
 ```
 
 `preferred_backend` keeps automatic recovery enabled and places `ndk` or
-`houdini` first in the candidate list. `default_backend` remains an explicit
-default and wins when both fields are present. The `abi.public` lists are the ABI view exposed through
+`houdini` first in the candidate list. Each backend contributes two internal
+candidates in order: `hybrid`, then `compat`. `compat` gives the selected
+backend first ownership of app-private native ELF and only falls back to the
+host linker when that backend rejects the library. `default_backend` remains an
+explicit default and wins when both fields are present. The `abi.public` lists are the ABI view exposed through
 `Build.SUPPORTED_ABIS` to applications. Framework package loading keeps its
 build-owned ABI list separately, so an x86 host ABI is not removed from the
 native loader path. Missing `abi.public` uses the ARM compatibility default.
@@ -66,13 +68,14 @@ native loader path. Missing `abi.public` uses the ARM compatibility default.
 String rules remain supported. Object rules retain candidate order and an
 optional explicit `selected_backend`. Explicit selections are never overridden.
 For `auto`, Android records the process version and candidate results. A native
-crash in a translated ARM process within 60 seconds selects the next untried
-candidate. Only a foreground main process restores its task; push and other
-helper/service processes restart independently and no longer tear down the
-foreground task. Java crashes, ANRs, native processes, and later crashes are
-unaffected. Each candidate is attempted once per application and system
-version. A backend that survives the 60-second probation window is kept, so a
-later ordinary application crash cannot poison the learned result.
+crash or the narrow translated-JNI `UnsatisfiedLinkError` failure within 60
+seconds selects the next untried candidate. Only a foreground main process
+restores its task; push and other helper/service processes restart independently
+and no longer tear down the foreground task. Other Java crashes, ANRs, native
+processes, and later crashes are unaffected. Each backend/mode candidate is
+attempted once per application and system version. A candidate that survives the
+60-second probation window is kept, so a later ordinary application crash cannot
+poison the learned result.
 
 Top-level `executables` entries are system-wide full-path rules. Entries inside
 a package object accept a full path, basename, or `*`, and package rules take
@@ -104,12 +107,14 @@ changing the backend loader/JNI constructor ordering.
 The product fragment enables `ro.floral.nativebridge.hybrid_elf=1`. With the
 companion ART patch, a bridged classloader owns both native and bridged linker
 namespaces. System-provided x86/x86_64 ELF files remain in the native namespace.
-Application-private native ELF files loaded by absolute path first use the
-selected translation backend and fall back to the native namespace when the
-backend rejects them; the returned handle records which owner must perform JNI
-and unload operations. ARM/ARM64 files and paths whose ELF type cannot be read
-continue through the selected translation backend. A single ELF dependency
-graph still cannot mix architectures.
+In `hybrid` mode, system-provided x86/x86_64 ELF files remain in the native
+namespace and app-private native ELF follows the existing host-first routing. In
+`compat` mode, platform paths remain host-owned, while app-private native ELF
+first uses the selected translation backend and falls back to the native
+namespace only when that backend rejects the library. The returned handle
+records which owner must perform JNI and unload operations. ARM/ARM64 files and
+paths whose ELF type cannot be read continue through the selected translation
+backend. A single ELF dependency graph still cannot mix architectures.
 
 The framework integration reserves 256 MiB for 32-bit WebView RELRO creation
 by default. Products with an unusually large provider can override the byte

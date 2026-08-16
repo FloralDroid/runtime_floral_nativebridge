@@ -95,6 +95,8 @@ android::native_bridge_namespace_t *GetExportedNamespace(const char *name) {
 
 void PreZygoteFork() { Manager().PreZygoteFork(); }
 
+bool UseCompatibilityLoader() { return Manager().UseCompatibilityLoader(); }
+
 } // namespace
 } // namespace floral::nativebridge
 
@@ -103,6 +105,12 @@ void PreZygoteFork() { Manager().PreZygoteFork(); }
 extern "C" void FloralNativeBridgeSetProcessContext(const char *process_name,
                                                     const char *app_data_dir) {
   floral::nativebridge::ConfigureProcessContext(process_name, app_data_dir);
+}
+
+// ART uses this per-process bit to choose the loader order for app-private
+// mixed ELF libraries. Unknown or legacy routers conservatively stay hybrid.
+extern "C" bool FloralNativeBridgeUseCompatibilityLoader() {
+  return floral::nativebridge::UseCompatibilityLoader();
 }
 
 // Keep the symbol name exactly as expected by ART's libnativebridge loader.

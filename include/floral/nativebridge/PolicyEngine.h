@@ -30,11 +30,25 @@ enum class BackendKind {
   kHoudini,
 };
 
+// Hybrid keeps the existing machine-based split. Compat gives the selected
+// backend ownership of app-private ELF loading and only uses the host linker
+// as an explicit fallback when that backend rejects the library.
+enum class LoaderMode {
+  kHybrid,
+  kCompat,
+};
+
+struct BackendCandidate {
+  BackendKind backend = BackendKind::kAuto;
+  LoaderMode mode = LoaderMode::kHybrid;
+};
+
 struct BackendSelection {
   BackendKind kind = BackendKind::kAuto;
+  LoaderMode loader_mode = LoaderMode::kHybrid;
   std::string name = "auto";
   std::string reason = "default";
-  std::vector<BackendKind> candidates;
+  std::vector<BackendCandidate> candidates;
   bool exhausted = false;
 };
 
@@ -72,6 +86,9 @@ private:
 
 const char *BackendKindName(BackendKind kind);
 BackendKind ParseBackendKind(std::string_view value);
+const char *LoaderModeName(LoaderMode mode);
+LoaderMode ParseLoaderMode(std::string_view value);
+std::string BackendCandidateName(const BackendCandidate &candidate);
 
 } // namespace floral::nativebridge
 

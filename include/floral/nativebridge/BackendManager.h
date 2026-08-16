@@ -71,6 +71,10 @@ public:
   void PreZygoteFork();
 
   BackendKind selected_kind() const { return selection_.kind; }
+  LoaderMode selected_loader_mode() const { return selection_.loader_mode; }
+  bool UseCompatibilityLoader() const {
+    return selection_.loader_mode == LoaderMode::kCompat;
+  }
   const std::string &selected_path() const { return selected_path_; }
 
 private:

@@ -109,8 +109,10 @@ int main() {
       engine.loaded() &&
       Check(exact.kind == floral::nativebridge::BackendKind::kAuto,
             "exact process rule") &&
-      Check(exact.candidates.size() == 2 &&
-                exact.candidates[0] == floral::nativebridge::BackendKind::kHoudini,
+      Check(exact.candidates.size() == 4 &&
+                exact.candidates[0].backend == floral::nativebridge::BackendKind::kHoudini &&
+                exact.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid &&
+                exact.candidates[1].mode == floral::nativebridge::LoaderMode::kCompat,
             "candidate order") &&
       Check(process.kind == floral::nativebridge::BackendKind::kHoudini,
             "process rule") &&
@@ -123,15 +125,20 @@ int main() {
       Check(global_executable.kind == floral::nativebridge::BackendKind::kNdk,
             "global executable rule") &&
       Check(refreshed.kind == floral::nativebridge::BackendKind::kHoudini &&
-                refreshed.candidates.size() == 1 &&
-                refreshed.candidates[0] == floral::nativebridge::BackendKind::kHoudini,
+                refreshed.candidates.size() == 2 &&
+                refreshed.candidates[0].backend == floral::nativebridge::BackendKind::kHoudini &&
+                refreshed.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid,
             "selected backend reload") &&
       Check(preferred.kind == floral::nativebridge::BackendKind::kAuto &&
-                preferred.candidates.size() == 2 &&
-                preferred.candidates[0] == floral::nativebridge::BackendKind::kNdk &&
-                preferred.candidates[1] == floral::nativebridge::BackendKind::kHoudini,
+                preferred.candidates.size() == 4 &&
+                preferred.candidates[0].backend == floral::nativebridge::BackendKind::kNdk &&
+                preferred.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid &&
+                preferred.candidates[1].backend == floral::nativebridge::BackendKind::kNdk &&
+                preferred.candidates[1].mode == floral::nativebridge::LoaderMode::kCompat &&
+                preferred.candidates[2].backend == floral::nativebridge::BackendKind::kHoudini,
             "preferred backend keeps automatic fallback") &&
       Check(recovered.kind == floral::nativebridge::BackendKind::kHoudini &&
+                recovered.loader_mode == floral::nativebridge::LoaderMode::kHybrid &&
                 recovered.reason == "Android runtime state",
             "runtime recovery state") &&
       Check(locked.kind == floral::nativebridge::BackendKind::kHoudini &&

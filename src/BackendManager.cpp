@@ -289,27 +289,32 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection) {
     SetError("no usable NativeBridge backend could be preloaded");
     return false;
   }
-  const std::vector<BackendKind> default_candidates = {
-      BackendKind::kNdk, BackendKind::kHoudini};
-  const std::vector<BackendKind> &candidates = selection.candidates.empty()
-                                                    ? default_candidates
-                                                    : selection.candidates;
-  for (const BackendKind kind : candidates) {
-    if (kind == BackendKind::kAuto) {
+  const std::vector<BackendCandidate> default_candidates = {
+      {BackendKind::kNdk, LoaderMode::kHybrid},
+      {BackendKind::kNdk, LoaderMode::kCompat},
+      {BackendKind::kHoudini, LoaderMode::kHybrid},
+      {BackendKind::kHoudini, LoaderMode::kCompat},
+  };
+  const std::vector<BackendCandidate> &candidates = selection.candidates.empty()
+                                                        ? default_candidates
+                                                        : selection.candidates;
+  for (const BackendCandidate candidate : candidates) {
+    if (candidate.backend == BackendKind::kAuto) {
       continue;
     }
-    const LoadedBackend *backend = FindLoadedBackend(kind);
+    const LoadedBackend *backend = FindLoadedBackend(candidate.backend);
     if (backend == nullptr) {
       continue;
     }
     callbacks_ = backend->callbacks;
-    selection_.kind = kind;
-    selection_.name = BackendKindName(kind);
+    selection_.kind = candidate.backend;
+    selection_.loader_mode = candidate.mode;
+    selection_.name = BackendKindName(candidate.backend);
     selection_.reason = selection.reason;
     selected_path_ = backend->path;
-    LOG(INFO) << "Selected " << selection_.name << " NativeBridge backend from "
-              << selected_path_ << " (interface v" << callbacks_->version
-              << ")";
+    LOG(INFO) << "Selected " << selection_.name << " NativeBridge backend in "
+              << LoaderModeName(selection_.loader_mode) << " mode from "
+              << selected_path_ << " (interface v" << callbacks_->version << ")";
     const std::string &diagnostic_process =
         process_name_.empty() ? package_name_ : process_name_;
     if (android::native_bridge_diagnostics::ShouldTraceProcess(
@@ -321,11 +326,12 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection) {
               ? callback_info.dli_fname
               : nullptr;
       android::native_bridge_diagnostics::Trace(
-          "stage=backend_selected process=%s package=%s backend=%s path=%s "
+          "stage=backend_selected process=%s package=%s backend=%s mode=%s path=%s "
           "backend_handle=%p callbacks=%p load_callback=%p callback_owner=%s "
           "version=%u",
           diagnostic_process.c_str(), package_name_.c_str(),
-          selection_.name.c_str(), selected_path_.c_str(), backend->handle,
+          selection_.name.c_str(), LoaderModeName(selection_.loader_mode),
+          selected_path_.c_str(), backend->handle,
           const_cast<void *>(static_cast<const void *>(callbacks_)),
           reinterpret_cast<void *>(callbacks_->loadLibrary),
           callback_owner == nullptr ? "<unknown>" : callback_owner,

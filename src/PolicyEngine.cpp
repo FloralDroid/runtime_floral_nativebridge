@@ -19,6 +19,19 @@
 namespace floral::nativebridge {
 namespace {
 
+std::vector<BackendCandidate> ExpandCandidates(
+    const std::vector<BackendKind> &backends) {
+  std::vector<BackendCandidate> candidates;
+  for (const BackendKind backend : backends) {
+    if (backend == BackendKind::kAuto) {
+      continue;
+    }
+    candidates.push_back({backend, LoaderMode::kHybrid});
+    candidates.push_back({backend, LoaderMode::kCompat});
+  }
+  return candidates;
+}
+
 BackendSelection SelectionFromJson(const Json::Value &value,
                                    std::string reason) {
   BackendSelection selection;
@@ -28,9 +41,10 @@ BackendSelection SelectionFromJson(const Json::Value &value,
     selection.name = BackendKindName(selection.kind);
     selection.reason = std::move(reason);
     if (selection.kind == BackendKind::kAuto) {
-      selection.candidates = {BackendKind::kNdk, BackendKind::kHoudini};
+      selection.candidates = ExpandCandidates(
+          {BackendKind::kNdk, BackendKind::kHoudini});
     } else {
-      selection.candidates = {selection.kind};
+      selection.candidates = ExpandCandidates({selection.kind});
     }
     if (selection.kind == BackendKind::kAuto && backend != "auto") {
       LOG(WARNING) << "Unknown Floral NativeBridge backend '" << backend
@@ -56,6 +70,7 @@ BackendSelection SelectionFromJson(const Json::Value &value,
   selection.kind = ParseBackendKind(backend);
   selection.name = BackendKindName(selection.kind);
   selection.reason = std::move(reason);
+  std::vector<BackendKind> backend_candidates;
   if (value["candidates"].isArray()) {
     for (const Json::Value &candidate : value["candidates"]) {
       if (!candidate.isString()) {
@@ -63,15 +78,16 @@ BackendSelection SelectionFromJson(const Json::Value &value,
       }
       const BackendKind kind = ParseBackendKind(candidate.asString());
       if (kind != BackendKind::kAuto) {
-        selection.candidates.push_back(kind);
+        backend_candidates.push_back(kind);
       }
     }
   }
   if (selection.kind != BackendKind::kAuto) {
-    selection.candidates = {selection.kind};
-  } else if (selection.candidates.empty()) {
-    selection.candidates = {BackendKind::kNdk, BackendKind::kHoudini};
+    backend_candidates = {selection.kind};
+  } else if (backend_candidates.empty()) {
+    backend_candidates = {BackendKind::kNdk, BackendKind::kHoudini};
   }
+  selection.candidates = ExpandCandidates(backend_candidates);
   return selection;
 }
 
@@ -81,7 +97,7 @@ BackendSelection PreferredSelectionFromJson(const Json::Value &value,
       .kind = BackendKind::kAuto,
       .name = BackendKindName(BackendKind::kAuto),
       .reason = std::move(reason),
-      .candidates = {BackendKind::kNdk, BackendKind::kHoudini},
+      .candidates = ExpandCandidates({BackendKind::kNdk, BackendKind::kHoudini}),
   };
   if (!value.isString()) {
     LOG(WARNING) << "Floral NativeBridge preferred_backend must be ndk or houdini";
@@ -90,7 +106,8 @@ BackendSelection PreferredSelectionFromJson(const Json::Value &value,
 
   const BackendKind preferred = ParseBackendKind(value.asString());
   if (preferred == BackendKind::kHoudini) {
-    selection.candidates = {BackendKind::kHoudini, BackendKind::kNdk};
+    selection.candidates = ExpandCandidates(
+        {BackendKind::kHoudini, BackendKind::kNdk});
   } else if (preferred != BackendKind::kNdk) {
     LOG(WARNING) << "Unknown Floral NativeBridge preferred backend '"
                  << value.asString() << "'; using ndk first";
@@ -139,6 +156,25 @@ const char *BackendKindName(BackendKind kind) {
   return "auto";
 }
 
+const char *LoaderModeName(LoaderMode mode) {
+  switch (mode) {
+  case LoaderMode::kHybrid:
+    return "hybrid";
+  case LoaderMode::kCompat:
+    return "compat";
+  }
+  return "hybrid";
+}
+
+LoaderMode ParseLoaderMode(std::string_view value) {
+  return value == "compat" ? LoaderMode::kCompat : LoaderMode::kHybrid;
+}
+
+std::string BackendCandidateName(const BackendCandidate &candidate) {
+  return std::string(BackendKindName(candidate.backend)) + "/" +
+         LoaderModeName(candidate.mode);
+}
+
 BackendKind ParseBackendKind(std::string_view value) {
   if (value == "ndk") {
     return BackendKind::kNdk;
@@ -156,7 +192,7 @@ PolicyEngine PolicyEngine::Load(std::string path) {
       .kind = BackendKind::kAuto,
       .name = BackendKindName(BackendKind::kAuto),
       .reason = "built-in default",
-      .candidates = {BackendKind::kNdk, BackendKind::kHoudini},
+      .candidates = ExpandCandidates({BackendKind::kNdk, BackendKind::kHoudini}),
   };
 
   std::ifstream file(engine.path_);
@@ -316,7 +352,7 @@ BackendSelection PolicyEngine::ApplyRuntimeState(BackendSelection selection,
     return selection;
   }
 
-  if (root["version"].isInt() && root["version"].asInt() > 2) {
+  if (root["version"].isInt() && root["version"].asInt() > 3) {
     LOG(WARNING) << "Unsupported Floral NativeBridge state version in " << path;
     return selection;
   }
@@ -340,16 +376,26 @@ BackendSelection PolicyEngine::ApplyRuntimeState(BackendSelection selection,
   if (kind == BackendKind::kAuto) {
     return selection;
   }
-  if (std::find(selection.candidates.begin(), selection.candidates.end(), kind) ==
-      selection.candidates.end()) {
+  LoaderMode mode = LoaderMode::kHybrid;
+  if (package["selected_loader_mode"].isString()) {
+    mode = ParseLoaderMode(package["selected_loader_mode"].asString());
+  }
+  const BackendCandidate selected{kind, mode};
+  const auto candidate = std::find_if(
+      selection.candidates.begin(), selection.candidates.end(),
+      [&selected](const BackendCandidate &value) {
+        return value.backend == selected.backend && value.mode == selected.mode;
+      });
+  if (candidate == selection.candidates.end()) {
     LOG(WARNING) << "Ignoring stale Floral NativeBridge state backend " << backend
                  << " for " << process_name;
     return selection;
   }
   selection.kind = kind;
+  selection.loader_mode = mode;
   selection.name = BackendKindName(kind);
   selection.reason = "Android runtime state";
-  selection.candidates = {kind};
+  selection.candidates = {selected};
   return selection;
 }
 

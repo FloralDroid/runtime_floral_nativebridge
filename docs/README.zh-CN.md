@@ -10,15 +10,11 @@ x86 Floral 产品应继承 `system/floral/nativebridge/nativebridge.mk`，由产
 片段安装库并设置 `ro.dalvik.vm.native.bridge=libmixbridge.so`；纯 ARM 产品
 不要继承该片段。
 
-Android 12 源码还需要五个 ART 配套补丁：
-`redroid-patches/android-12.0.0_r32/art/0001-expose-nativebridge-headers-to-floral.patch`，
-`0002-support-hybrid-nativebridge-elf-loading.patch`、
-`0003-pass-Floral-NativeBridge-process-context.patch`、
-`0004-keep-app-private-mixed-ELF-in-NativeBridge.patch` 和
-`0005-add-scoped-Floral-NativeBridge-diagnostics.patch`。它们分别开放 ART 回调头文件、
-让桥接 classloader 按 ELF 架构选择 namespace、在 zygote 降权前传入真实进程
-身份、保持应用私有混合 ELF 的句柄归属，并提供受包名约束的 JNI 加载诊断。frameworks/base 配套补丁负责保存选择和
-处理早期 native crash。
+Android 12 源码还需要 `redroid-patches/android-12.0.0_r32/art/` 下的 ART
+配套补丁组。它们开放 ART 回调头文件、让桥接 classloader 按 ELF 架构选择
+namespace、在 zygote 降权前传入真实进程身份、暴露每进程兼容加载模式，并提供
+受包名约束的 JNI 加载诊断。frameworks/base 配套补丁负责保存选择并处理早期
+native 和 JNI 加载失败。
 
 ## 策略文件
 
@@ -55,7 +51,9 @@ Android 12 源码还需要五个 ART 配套补丁：
 ```
 
 `preferred_backend` 保持自动回退，并把指定的 `ndk` 或 `houdini` 放在候选首位；
-`default_backend` 仍表示显式默认后端，两者同时存在时以它为准。`abi.public`
+每个后端内部依次包含 `hybrid`、`compat` 两种候选。`compat` 会先把应用私有
+原生 ELF 交给选定转译后端，只有后端拒绝时才交给宿主 linker。`default_backend`
+仍表示显式默认后端，两者同时存在时以它为准。`abi.public`
 控制应用通过 `Build.SUPPORTED_ABIS`
 看到的 ABI；PackageManager 等框架内部仍使用构建时的 loader ABI，因此不会
 把 x86 主机 ABI 从本地加载路径中移除。缺少 `abi.public` 时使用 ARM 兼容默认值。
@@ -63,10 +61,11 @@ Android 12 源码还需要五个 ART 配套补丁：
 原有字符串规则继续兼容。对象规则用于保存候选顺序和可选的显式
 `selected_backend`；存在该字段时运行时只使用已选后端，Android 不会覆盖。
 `auto` 规则由 Android 保存进程版本和候选结果。ARM 转译进程在启动后 60 秒内
-发生 native crash 时，Android 会切换到尚未失败的下一候选。只有包含 Activity
+发生 native crash，或出现特定的 JNI `UnsatisfiedLinkError` 时，Android 会切换到
+尚未失败的下一候选。只有包含 Activity
 的前台主进程才恢复原任务；推送等 helper/service 进程只重启自身，不再销毁前台
 任务。普通 Java 崩溃、ANR、非 ARM 进程及窗口外崩溃不参与回退。每个候选在
-同一应用和系统版本中只尝试一次；后端通过 60 秒稳定窗口后会固定选择，避免把
+同一应用和系统版本中只尝试一次；候选通过 60 秒稳定窗口后会固定选择，避免把
 后续普通应用崩溃误判成转译失败。应用或系统版本变化时重置对应状态。
 
 顶层 `executables` 为系统级完整路径规则；包对象内的 `executables` 支持完整路径、
@@ -93,10 +92,11 @@ ART，避免两个转译运行时共享进程状态。NativeBridge wrapper 在 z
 
 产品片段默认启用 `ro.floral.nativebridge.hybrid_elf=1`。配套 ART 补丁会为
 桥接 classloader 同时建立宿主和桥接 namespace；系统提供的 x86/x86_64 ELF
-仍直接走宿主 namespace。应用私有、通过绝对路径加载的原生 ELF 会先交给
-已选择的转译后端，后端拒绝时再回退到宿主 namespace；加载结果会记录真实
-句柄归属，确保 JNI 和卸载使用同一个所有者。ARM/ARM64 和无法直接识别的
-路径仍交给已选择的转译后端。该能力不会在同一个 ELF 依赖图中混合架构。
+在 `hybrid` 模式下，系统提供的 x86/x86_64 ELF 和应用私有 native ELF 保持
+宿主优先；`compat` 模式仍让系统路径由宿主负责，但应用私有 native ELF 先交给
+已选择的转译后端，后端拒绝时再回退到宿主 namespace。加载结果会记录真实句柄
+归属，确保 JNI 和卸载使用同一个所有者。ARM/ARM64 和无法直接识别的路径仍交给
+已选择的转译后端。该能力不会在同一个 ELF 依赖图中混合架构。
 
 框架集成默认给 32 位 WebView RELRO 创建预留 256 MiB 地址空间。使用超大
 WebView provider 的产品可以通过 `ro.floral.webview.vmsize32` 和
