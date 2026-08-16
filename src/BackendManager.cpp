@@ -44,38 +44,18 @@ constexpr int GuestArchitecture() {
 }
 
 bool HasRequiredCallbacks(const android::NativeBridgeCallbacks *callbacks) {
-  if (callbacks == nullptr || callbacks->version == 0 ||
-      callbacks->initialize == nullptr || callbacks->loadLibrary == nullptr ||
-      callbacks->getTrampoline == nullptr || callbacks->isSupported == nullptr ||
-      callbacks->getAppEnv == nullptr) {
-    return false;
-  }
-
-  // NativeBridgeCallbacks grows by interface version. Only inspect fields
-  // guaranteed to exist in the advertised version.
-  if (callbacks->version >= 2 &&
-      (callbacks->isCompatibleWith == nullptr ||
-       callbacks->getSignalHandler == nullptr)) {
-    return false;
-  }
-  if (callbacks->version >= 3 &&
-      (callbacks->unloadLibrary == nullptr || callbacks->getError == nullptr ||
-       callbacks->isPathSupported == nullptr ||
-       callbacks->initAnonymousNamespace == nullptr ||
-       callbacks->createNamespace == nullptr || callbacks->linkNamespaces == nullptr ||
-       callbacks->loadLibraryExt == nullptr)) {
-    return false;
-  }
-  if (callbacks->version >= 4 && callbacks->getVendorNamespace == nullptr) {
-    return false;
-  }
-  if (callbacks->version >= 5 && callbacks->getExportedNamespace == nullptr) {
-    return false;
-  }
-  if (callbacks->version >= 6 && callbacks->preZygoteFork == nullptr) {
-    return false;
-  }
-  return true;
+  return callbacks->initialize != nullptr &&
+         callbacks->loadLibrary != nullptr &&
+         callbacks->getTrampoline != nullptr &&
+         callbacks->isSupported != nullptr && callbacks->getAppEnv != nullptr &&
+         callbacks->isCompatibleWith != nullptr &&
+         callbacks->getSignalHandler != nullptr &&
+         callbacks->unloadLibrary != nullptr && callbacks->getError != nullptr &&
+         callbacks->isPathSupported != nullptr &&
+         callbacks->initAnonymousNamespace != nullptr &&
+         callbacks->createNamespace != nullptr &&
+         callbacks->linkNamespaces != nullptr &&
+         callbacks->loadLibraryExt != nullptr;
 }
 
 std::string ReadProcessName() {
@@ -109,10 +89,8 @@ BackendManager::BackendManager()
           "ro.floral.nativebridge.policy", PolicyEngine::kDefaultPath)) {}
 
 BackendManager::~BackendManager() {
-  for (const LoadedBackend &backend : loaded_backends_) {
-    if (backend.handle != nullptr) {
-      dlclose(backend.handle);
-    }
+  if (backend_handle_ != nullptr) {
+    dlclose(backend_handle_);
   }
 }
 
@@ -208,85 +186,9 @@ std::string BackendManager::BackendPath(BackendKind kind) const {
   return {};
 }
 
-bool BackendManager::IsBackendCompatible(const LoadedBackend &backend,
-                                         uint32_t bridge_version) const {
-  if (bridge_version == 0 || bridge_version > kMaxNativeBridgeVersion ||
-      backend.callbacks == nullptr || backend.callbacks->version < bridge_version) {
-    return false;
-  }
-  if (backend.callbacks->version >= 2 && backend.callbacks->isCompatibleWith != nullptr) {
-    return backend.callbacks->isCompatibleWith(bridge_version);
-  }
-  return true;
-}
-
-bool BackendManager::LoadBackend(BackendKind kind, const std::string &path) {
-  if (path.empty()) {
-    return false;
-  }
-
-  void *handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
-  if (handle == nullptr) {
-    const char *error = dlerror();
-    LOG(WARNING) << "Floral NativeBridge: cannot preload " << BackendKindName(kind)
-                 << " backend " << path << ": "
-                 << (error == nullptr ? "unknown error" : error);
-    return false;
-  }
-
-  auto *callbacks = reinterpret_cast<const android::NativeBridgeCallbacks *>(
-      dlsym(handle, kInterfaceSymbol));
-  LoadedBackend backend{kind, path, handle, callbacks};
-  if (callbacks == nullptr || callbacks->version < kRequiredNativeBridgeVersion ||
-      callbacks->version > kMaxNativeBridgeVersion || !HasRequiredCallbacks(callbacks) ||
-      !IsBackendCompatible(backend, kRequiredNativeBridgeVersion)) {
-    LOG(WARNING) << "Floral NativeBridge: rejecting " << BackendKindName(kind)
-                 << " backend " << path
-                 << " because it does not provide a compatible Android 12 interface";
-    dlclose(handle);
-    return false;
-  }
-
-  loaded_backends_.push_back(backend);
-  LOG(INFO) << "Preloaded " << BackendKindName(kind) << " NativeBridge backend from "
-            << path << " (interface v" << callbacks->version << ")";
-  return true;
-}
-
-bool BackendManager::PreloadBackends() {
-  if (backends_preloaded_) {
-    return !loaded_backends_.empty();
-  }
-  backends_preloaded_ = true;
-
-  // Keep both implementations resident in the zygote. Protected translation
-  // runtimes may perform loader/JNI setup from constructors, so loading only
-  // the selected implementation after fork changes their observable startup
-  // order. Selection still remains per-process and initialization is singular.
-  const BackendKind backends[] = {BackendKind::kNdk, BackendKind::kHoudini};
-  for (const BackendKind kind : backends) {
-    LoadBackend(kind, BackendPath(kind));
-  }
-  return !loaded_backends_.empty();
-}
-
-const BackendManager::LoadedBackend *BackendManager::FindLoadedBackend(
-    BackendKind kind) const {
-  for (const LoadedBackend &backend : loaded_backends_) {
-    if (backend.kind == kind) {
-      return &backend;
-    }
-  }
-  return nullptr;
-}
-
 bool BackendManager::LoadSelectedBackend(const BackendSelection &selection) {
   if (selection.exhausted) {
     SetError("NativeBridge backend candidates exhausted by Android runtime state");
-    return false;
-  }
-  if (!PreloadBackends()) {
-    SetError("no usable NativeBridge backend could be preloaded");
     return false;
   }
   const std::vector<BackendCandidate> default_candidates = {
@@ -302,17 +204,44 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection) {
     if (candidate.backend == BackendKind::kAuto) {
       continue;
     }
-    const LoadedBackend *backend = FindLoadedBackend(candidate.backend);
-    if (backend == nullptr) {
+    const std::string path = BackendPath(candidate.backend);
+    if (path.empty()) {
       continue;
     }
-    callbacks_ = backend->callbacks;
+
+    void *handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (handle == nullptr) {
+      const char *error = dlerror();
+      if (selection.kind != BackendKind::kAuto) {
+        SetError("cannot load " +
+                 std::string(BackendKindName(candidate.backend)) +
+                 " backend " + path + ": " +
+                 (error == nullptr ? "unknown error" : error));
+      }
+      continue;
+    }
+
+    auto *callbacks = reinterpret_cast<const android::NativeBridgeCallbacks *>(
+        dlsym(handle, kInterfaceSymbol));
+    if (callbacks == nullptr ||
+        callbacks->version < kRequiredNativeBridgeVersion ||
+        !HasRequiredCallbacks(callbacks) ||
+        !callbacks->isCompatibleWith(kRequiredNativeBridgeVersion)) {
+      SetError("backend " + path +
+               " does not provide the Android 12 NativeBridge namespace "
+               "interface");
+      dlclose(handle);
+      continue;
+    }
+
+    backend_handle_ = handle;
+    callbacks_ = callbacks;
     selection_.kind = candidate.backend;
     selection_.loader_mode = candidate.mode;
     selection_.name = BackendKindName(candidate.backend);
     selection_.reason = selection.reason;
-    selected_path_ = backend->path;
-    LOG(INFO) << "Selected " << selection_.name << " NativeBridge backend in "
+    selected_path_ = path;
+    LOG(INFO) << "Loaded " << selection_.name << " NativeBridge backend in "
               << LoaderModeName(selection_.loader_mode) << " mode from "
               << selected_path_ << " (interface v" << callbacks_->version << ")";
     const std::string &diagnostic_process =
@@ -331,7 +260,7 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection) {
           "version=%u",
           diagnostic_process.c_str(), package_name_.c_str(),
           selection_.name.c_str(), LoaderModeName(selection_.loader_mode),
-          selected_path_.c_str(), backend->handle,
+          selected_path_.c_str(), backend_handle_,
           const_cast<void *>(static_cast<const void *>(callbacks_)),
           reinterpret_cast<void *>(callbacks_->loadLibrary),
           callback_owner == nullptr ? "<unknown>" : callback_owner,
@@ -403,19 +332,13 @@ bool BackendManager::IsCompatibleWith(uint32_t bridge_version) {
       bridge_version > kMaxNativeBridgeVersion) {
     return false;
   }
-  if (callbacks_ != nullptr) {
-    const LoadedBackend *backend = FindLoadedBackend(selection_.kind);
-    return backend != nullptr && IsBackendCompatible(*backend, bridge_version);
+  // ART asks this before InitializeNativeBridge(), while the process is still
+  // the zygote. Do not load a backend here or all app children would inherit
+  // one zygote-wide selection and process rules could never take effect.
+  if (callbacks_ != nullptr && callbacks_->isCompatibleWith != nullptr) {
+    return callbacks_->isCompatibleWith(bridge_version);
   }
-  if (!PreloadBackends()) {
-    return false;
-  }
-  for (const LoadedBackend &backend : loaded_backends_) {
-    if (IsBackendCompatible(backend, bridge_version)) {
-      return true;
-    }
-  }
-  return false;
+  return callbacks_ == nullptr || callbacks_->version >= bridge_version;
 }
 
 void *BackendManager::LoadLibrary(const char *path, int flags) const {
@@ -561,18 +484,9 @@ BackendManager::GetExportedNamespace(const char *name) const {
              : nullptr;
 }
 
-void BackendManager::PreZygoteFork() {
-  if (!PreloadBackends()) {
-    return;
-  }
-  // Each resident v6 runtime receives the fork preparation callback while the
-  // process is still the zygote. Child processes still initialize only the
-  // backend selected for that process.
-  for (const LoadedBackend &backend : loaded_backends_) {
-    if (backend.callbacks->version >= 6 &&
-        backend.callbacks->preZygoteFork != nullptr) {
-      backend.callbacks->preZygoteFork();
-    }
+void BackendManager::PreZygoteFork() const {
+  if (callbacks_ != nullptr && callbacks_->preZygoteFork != nullptr) {
+    callbacks_->preZygoteFork();
   }
 }
 
