@@ -22,11 +22,19 @@ namespace {
 std::vector<BackendCandidate> ExpandCandidates(
     const std::vector<BackendKind> &backends) {
   std::vector<BackendCandidate> candidates;
+  // Complete the enhanced loader pass for every configured backend before
+  // considering transparent forwarding. This keeps recovery deterministic and
+  // avoids changing the loader model between adjacent backend attempts.
   for (const BackendKind backend : backends) {
     if (backend == BackendKind::kAuto) {
       continue;
     }
     candidates.push_back({backend, LoaderMode::kHybrid});
+  }
+  for (const BackendKind backend : backends) {
+    if (backend == BackendKind::kAuto) {
+      continue;
+    }
     candidates.push_back({backend, LoaderMode::kDirect});
   }
   return candidates;
@@ -59,8 +67,9 @@ BackendSelection SelectionFromJson(const Json::Value &value,
 
   // The policy file may keep candidate order and an explicit selected backend
   // in one object. The selected value is preferred for the next process.
+  const bool has_selected_backend = value["selected_backend"].isString();
   std::string backend = "auto";
-  if (value["selected_backend"].isString()) {
+  if (has_selected_backend) {
     backend = value["selected_backend"].asString();
   } else if (value["backend"].isString()) {
     backend = value["backend"].asString();
@@ -70,6 +79,10 @@ BackendSelection SelectionFromJson(const Json::Value &value,
   selection.kind = ParseBackendKind(backend);
   selection.name = BackendKindName(selection.kind);
   selection.reason = std::move(reason);
+  if (has_selected_backend && value["selected_loader_mode"].isString()) {
+    selection.loader_mode =
+        ParseLoaderMode(value["selected_loader_mode"].asString());
+  }
   std::vector<BackendKind> backend_candidates;
   if (value["candidates"].isArray()) {
     for (const Json::Value &candidate : value["candidates"]) {
@@ -83,7 +96,8 @@ BackendSelection SelectionFromJson(const Json::Value &value,
     }
   }
   if (selection.kind != BackendKind::kAuto) {
-    backend_candidates = {selection.kind};
+    selection.candidates = {{selection.kind, selection.loader_mode}};
+    return selection;
   } else if (backend_candidates.empty()) {
     backend_candidates = {BackendKind::kNdk, BackendKind::kHoudini};
   }

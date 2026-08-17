@@ -17,9 +17,8 @@
 #ifndef FLORAL_NATIVEBRIDGE_BACKEND_MANAGER_H_
 #define FLORAL_NATIVEBRIDGE_BACKEND_MANAGER_H_
 
-#include <mutex>
 #include <string>
-#include <unordered_map>
+#include <vector>
 
 #include "nativebridge/native_bridge.h"
 
@@ -35,6 +34,9 @@ public:
   void ConfigureProcessContext(const char *process_name,
                                const char *app_data_dir);
   bool EnsureLoaded();
+  // Direct mode must be selected before ART pre-initializes the backend so
+  // ART can bind the real backend callback table for the whole app lifetime.
+  bool PrepareDirectBackend();
   bool
   Initialize(const android::NativeBridgeRuntimeCallbacks *runtime_callbacks,
              const char *private_dir, const char *instruction_set);
@@ -67,40 +69,44 @@ public:
   android::native_bridge_namespace_t *GetVendorNamespace() const;
   android::native_bridge_namespace_t *
   GetExportedNamespace(const char *name) const;
-  void PreZygoteFork() const;
+  void PreZygoteFork();
 
   BackendKind selected_kind() const { return selection_.kind; }
   LoaderMode selected_loader_mode() const { return selection_.loader_mode; }
-  bool UseDirectLoader() const {
-    return selection_.loader_mode == LoaderMode::kDirect;
-  }
-  // Kept for older integrations while the public mode is renamed to direct.
-  bool UseCompatibilityLoader() const {
-    return UseDirectLoader();
+  bool UseHybridLoader() const {
+    return selection_.loader_mode == LoaderMode::kHybrid;
   }
   const std::string &selected_path() const { return selected_path_; }
 
 private:
+  struct LoadedBackend {
+    BackendKind kind = BackendKind::kAuto;
+    std::string path;
+    void *handle = nullptr;
+    const android::NativeBridgeCallbacks *callbacks = nullptr;
+  };
+
   std::string ProcessName() const;
   static std::string PackageNameFromDataDir(const char *app_data_dir);
   std::string BackendPath(BackendKind kind) const;
+  bool PreloadBackends();
+  bool LoadBackend(BackendKind kind, const std::string &path);
+  const LoadedBackend *FindLoadedBackend(BackendKind kind) const;
+  bool IsBackendCompatible(const LoadedBackend &backend,
+                           uint32_t bridge_version) const;
   bool LoadSelectedBackend(const BackendSelection &selection);
-  void RememberLibrary(void *handle, const char *path) const;
-  void ForgetLibrary(void *handle) const;
-  std::string LibraryPath(void *handle) const;
   void SetError(std::string message) const;
 
   std::string policy_path_;
   std::string process_name_;
   std::string package_name_;
-  void *backend_handle_ = nullptr;
+  std::vector<LoadedBackend> loaded_backends_;
   const android::NativeBridgeCallbacks *callbacks_ = nullptr;
   BackendSelection selection_;
   std::string selected_path_;
-  mutable std::mutex library_mutex_;
-  mutable std::unordered_map<void *, std::string> library_paths_;
   mutable std::string last_error_;
   bool selection_prepared_ = false;
+  bool backends_preloaded_ = false;
   bool initialized_ = false;
 };
 

@@ -95,9 +95,14 @@ android::native_bridge_namespace_t *GetExportedNamespace(const char *name) {
 
 void PreZygoteFork() { Manager().PreZygoteFork(); }
 
-bool UseDirectLoader() { return Manager().UseDirectLoader(); }
+bool UseHybridLoader() { return Manager().UseHybridLoader(); }
 
-bool UseCompatibilityLoader() { return UseDirectLoader(); }
+const char *PrepareDirectBackend() {
+  if (!Manager().PrepareDirectBackend()) {
+    return nullptr;
+  }
+  return Manager().selected_path().c_str();
+}
 
 } // namespace
 } // namespace floral::nativebridge
@@ -109,14 +114,16 @@ extern "C" void FloralNativeBridgeSetProcessContext(const char *process_name,
   floral::nativebridge::ConfigureProcessContext(process_name, app_data_dir);
 }
 
-// ART uses this per-process bit to select the bridged-only direct loader.
-extern "C" bool FloralNativeBridgeUseDirectLoader() {
-  return floral::nativebridge::UseDirectLoader();
+// ART uses this per-process bit only to enable Floral's hybrid enhancement.
+// A false result leaves the platform NativeLoader behavior unchanged.
+extern "C" bool FloralNativeBridgeUseHybridLoader() {
+  return floral::nativebridge::UseHybridLoader();
 }
 
-// Preserve the old extension symbol for an incremental image update.
-extern "C" bool FloralNativeBridgeUseCompatibilityLoader() {
-  return floral::nativebridge::UseCompatibilityLoader();
+// ART calls this after process context selection and before pre-initializing
+// the bridge. The returned path identifies the backend ART must bind directly.
+extern "C" const char *FloralNativeBridgePrepareDirectBackend() {
+  return floral::nativebridge::PrepareDirectBackend();
 }
 
 // Keep the symbol name exactly as expected by ART's libnativebridge loader.

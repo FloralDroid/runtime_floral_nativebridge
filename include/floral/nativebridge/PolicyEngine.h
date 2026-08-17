@@ -30,8 +30,8 @@ enum class BackendKind {
   kHoudini,
 };
 
-// Hybrid keeps the existing machine-based split. Direct gives the selected
-// backend ownership of every bridged ELF load without a host-linker fallback.
+// Hybrid enables Floral's mixed-ABI and guest-identity enhancements. Direct
+// keeps Android's original NativeLoader behavior and only selects the backend.
 enum class LoaderMode {
   kHybrid,
   kDirect,

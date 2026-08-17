@@ -1,7 +1,8 @@
 # Floral 聚合 NativeBridge
 
 `libmixbridge.so` 是 x86 Android 镜像使用的单一 NativeBridge 入口，负责
-在每个进程内选择一个 ARM 转译后端，并转发 Android 12 NativeBridge v6 回调。
+在每个进程内选择一个 ARM 转译后端。`hybrid` 模式转发 Android 12
+NativeBridge v6 回调；`direct` 模式由 ART 直接绑定所选后端的 callback 表。
 NDK Translation 和 Houdini 二进制不放入本仓库。
 
 x86 Floral 产品应继承 `system/floral/nativebridge/nativebridge.mk`，由产品
@@ -10,9 +11,9 @@ x86 Floral 产品应继承 `system/floral/nativebridge/nativebridge.mk`，由产
 
 Android 12 源码还需要 `redroid-patches/android-12.0.0_r32/art/` 下的 ART
 配套补丁组。它们开放 ART 回调头文件、让桥接 classloader 按 ELF 架构选择
-namespace、在 zygote 降权前传入真实进程身份、暴露每进程兼容加载模式，并提供
-受包名约束的 JNI 加载诊断。frameworks/base 配套补丁负责保存选择并处理早期
-native 和 JNI 加载失败。
+namespace、在 zygote 降权前传入真实进程身份，并把混合加载增强限制在明确选择
+`hybrid` 的进程内。frameworks/base 配套补丁负责保存选择并处理早期 native 和
+JNI 加载失败。
 
 ## 策略文件
 
@@ -48,9 +49,11 @@ native 和 JNI 加载失败。
 }
 ```
 
-`preferred_backend` 保持自动回退，并把指定的 `ndk` 或 `houdini` 放在候选首位；
-每个后端内部依次包含 `hybrid`、`direct` 两种候选。`direct` 会把所有桥接
-ELF 交给选定转译后端，后端拒绝时直接向 ART 返回失败，不再交给宿主 linker。
+`preferred_backend` 保持自动回退，并把指定的 `ndk` 或 `houdini` 放在后端首位。
+自动回退会先完整遍历所有后端的 `hybrid` 候选，再遍历 `direct` 候选；默认顺序为
+`ndk/hybrid`、`houdini/hybrid`、`ndk/direct`、`houdini/direct`。`direct` 只负责选择后端，
+NativeLoader namespace、库所有权和进程身份均保持 AOSP 与该后端的原始行为；
+ART 直接调用所选后端的 callbacks，不再经过 `libmixbridge` 转发。
 `default_backend`
 仍表示显式默认后端，两者同时存在时以它为准。`abi.public`
 控制应用通过 `Build.SUPPORTED_ABIS`
@@ -59,6 +62,8 @@ ELF 交给选定转译后端，后端拒绝时直接向 ART 返回失败，不�
 
 原有字符串规则继续兼容。对象规则用于保存候选顺序和可选的显式
 `selected_backend`；存在该字段时运行时只使用已选后端，Android 不会覆盖。
+显式规则可通过 `selected_loader_mode` 选择 `hybrid` 或 `direct`，缺省为
+`hybrid`。
 `auto` 规则由 Android 保存进程版本和候选结果。ARM 转译进程在启动后 60 秒内
 发生 native crash，或出现特定的 JNI `UnsatisfiedLinkError` 时，Android 会切换到
 尚未失败的下一候选。只有包含 Activity
@@ -83,48 +88,30 @@ native crash 回退和任务恢复均由 Android 内部负责，不依赖宿主�
 通过 `AtomicFile` 写入 `/data/system/floral/nativebridge-state.json`，不使用
 SQLite。后端必须提供 Android 12 使用的
 NativeBridge v3 namespace 接口；加载、接口检查或初始化失败会直接报告给
-ART，避免两个转译运行时共享进程状态。策略读取和后端加载都会延迟到 zygote
-fork 之后；ART 在降权前明确传入 nice name 和应用数据目录，不再依赖初始化
-阶段的 `/proc/self/cmdline`。ABI 环境沿用后端返回值，不修改全局
+ART，避免两个转译运行时共享进程状态。后端 DSO 会在 zygote 中通过 ART 的
+system linker namespace 和 `RTLD_LAZY` 预加载，并完成 NativeBridge 接口校验。
+策略选择仍延迟到 zygote fork 之后：`hybrid` 子进程选择路由器缓存的 callback 表；
+`direct` 子进程则在 pre-initialize 前由 ART 通过相同 system namespace 重新取得
+已驻留的后端 DSO，并替换 ART 当前的 NativeBridge handle 和 callback 表。两种模式都
+只初始化所选后端。ART 在降权前明确传入 nice name 和应用数据目录，不再依赖初始化阶段的
+`/proc/self/cmdline`。ABI 环境沿用后端返回值，不修改全局
 `ro.product.cpu.*`。
 
 产品片段默认启用 `ro.floral.nativebridge.hybrid_elf=1`。配套 ART 补丁会为
-桥接 classloader 同时建立宿主和桥接 namespace；系统提供的 x86/x86_64 ELF
-在 `hybrid` 模式下，系统提供的 x86/x86_64 ELF 和应用私有 native ELF 保持
-宿主优先；`direct` 模式只建立桥接 namespace，所有加载都交给已选择的转译后端，
-失败直接返回 ART，不回退到宿主 namespace。加载结果会记录真实句柄归属，确保
-JNI 和卸载使用同一个所有者。ARM/ARM64 和无法直接识别的路径仍交给已选择的
-转译后端。该能力不会在同一个 ELF 依赖图中混合架构。
+选择 `hybrid` 的桥接 classloader 同时建立宿主和桥接 namespace；系统提供的
+x86/x86_64 ELF 保持宿主所有权。应用私有 native ELF 先交给已选择的转译后端，
+仅在后端拒绝时回退宿主 namespace。ARM/ARM64 和无法直接识别的路径交给已选择的
+转译后端。加载结果会记录真实句柄归属，确保 JNI 和卸载使用同一个所有者。
+`direct` 不创建 Floral 宿主 namespace、不执行 ELF 分流，也不启用 Floral guest
+identity；ART 像独立 NativeBridge 一样直接持有所选后端的 handle 和 callback 表。
+混合模式不会在同一个 ELF 依赖图中混合架构。
 
 框架集成默认给 32 位 WebView RELRO 创建预留 256 MiB 地址空间。使用超大
 WebView provider 的产品可以通过 `ro.floral.webview.vmsize32` 和
 `ro.floral.webview.vmsize64` 按字节覆盖；非正数会回退到默认值。
 
-## 诊断
-
-统一诊断默认关闭。必须先指定完整包名；可选 SO 过滤接受完整路径或文件名，
-包名会同时匹配该包的 `:remote` 等子进程。`debug.*` 属性不会持久化到重启后。
-
-```shell
-adb shell setprop debug.floral.nbdiag.package com.example.app
-adb shell setprop debug.floral.nbdiag.library libsample.so
-adb logcat -s FloralNBDiag
-```
-
-日志按顺序覆盖后端选择和初始化、`loadLibrary`/`loadLibraryExt`、trampoline、
-`JNI_OnLoad` 返回值以及 `RegisterNatives` 的方法表和结果。清空包名立即关闭诊断：
-
-```shell
-adb shell setprop debug.floral.nbdiag.package ''
-adb shell setprop debug.floral.nbdiag.library ''
-```
-
-`RegisterNatives` 通常在 `JNI_OnLoad` 线程中执行，因此日志可以标明所属 SO；若保护
-壳在其他线程延迟注册，所属 SO 显示为 `<unknown>`，但包级过滤仍会保留注册记录。
-
 ## 测试
 
-`floral_nativebridge_policy_test` 检查策略优先级，
-`floral_nativebridge_diagnostics_test` 检查包和 SO 过滤；Android 目标
+`floral_nativebridge_policy_test` 检查策略优先级；Android 目标
 `floral_nativebridge_probe` 只打开库并检查 `NativeBridgeItf` 导出，不会在
 一个进程内初始化两个后端。

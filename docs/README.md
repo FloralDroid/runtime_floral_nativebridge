@@ -2,8 +2,9 @@
 
 `libmixbridge.so` is a single Android NativeBridge entry point for x86 Android
 images that need to run ARM applications. It selects one backend per process
-and forwards the Android 12 NativeBridge v6 callbacks without placing
-translation binaries in this repository.
+without placing translation binaries in this repository. Hybrid mode forwards
+Android 12 NativeBridge v6 callbacks; direct mode asks ART to bind the selected
+backend callback table itself.
 
 Include `system/floral/nativebridge/nativebridge.mk` from an x86 Floral device
 product to install the library and set `ro.dalvik.vm.native.bridge` to
@@ -12,8 +13,8 @@ product to install the library and set `ro.dalvik.vm.native.bridge` to
 The Android 12 source tree also needs the companion ART patch set under
 `redroid-patches/android-12.0.0_r32/art/`. It exposes the ART callback header,
 routes native ELF files from a bridged classloader, passes the real process
-identity before the zygote child drops privileges, exposes the per-process
-direct loader mode, and provides package-scoped JNI loading diagnostics.
+identity before the zygote child drops privileges, and limits mixed loading to
+processes that explicitly select `hybrid`.
 A companion frameworks/base patch persists selection and handles early native
 and JNI-loader failures.
 
@@ -54,10 +55,13 @@ not need access to the host file.
 ```
 
 `preferred_backend` keeps automatic recovery enabled and places `ndk` or
-`houdini` first in the candidate list. Each backend contributes two internal
-candidates in order: `hybrid`, then `direct`. `direct` gives the selected
-backend ownership of every bridged ELF load without falling back to the host
-linker. `default_backend` remains an
+`houdini` first in the backend order. Automatic recovery completes the
+`hybrid` pass for every configured backend before it starts the `direct` pass;
+for example, the default order is `ndk/hybrid`, `houdini/hybrid`,
+`ndk/direct`, `houdini/direct`. `direct` only selects the backend;
+NativeLoader namespaces, library ownership, and process identity retain the
+original AOSP and backend behavior while ART invokes that backend's callbacks
+without a `libmixbridge` forwarding hop. `default_backend` remains an
 explicit default and wins when both fields are present. The `abi.public` lists are the ABI view exposed through
 `Build.SUPPORTED_ABIS` to applications. Framework package loading keeps its
 build-owned ABI list separately, so an x86 host ABI is not removed from the
@@ -65,6 +69,8 @@ native loader path. Missing `abi.public` uses the ARM compatibility default.
 
 String rules remain supported. Object rules retain candidate order and an
 optional explicit `selected_backend`. Explicit selections are never overridden.
+An explicit rule may set `selected_loader_mode` to `hybrid` or `direct`; it
+defaults to `hybrid`.
 For `auto`, Android records the process version and candidate results. A native
 crash or the narrow translated-JNI `UnsatisfiedLinkError` failure within 60
 seconds selects the next untried candidate. Only a foreground main process
@@ -96,21 +102,27 @@ agent. Recovery state is written with `AtomicFile` to
 provide the NativeBridge v3 namespace interface used
 by Android 12. A failed load, interface check, or initialization is reported to
 ART, preventing two translation runtimes from sharing one process state.
-Policy and backend loading are deferred until after zygote fork. ART explicitly
-passes the nice name and app data directory before privileges are dropped, so
-selection no longer depends on an early `/proc/self/cmdline` value.
+Backend DSOs are preloaded in the zygote with ART's system linker namespace and
+`RTLD_LAZY`, then validated through their NativeBridge interfaces. Policy
+selection remains deferred until after zygote fork. In hybrid mode the child
+selects a cached callback table behind the router. In direct mode ART reopens
+the selected resident DSO in the same system namespace and replaces its active
+NativeBridge callback table before pre-initialization. Only that backend is
+initialized. ART explicitly passes the nice name and app data directory before
+privileges are dropped, so selection does not depend on an early
+`/proc/self/cmdline` value.
 
 The product fragment enables `ro.floral.nativebridge.hybrid_elf=1`. With the
-companion ART patch, a bridged classloader owns both native and bridged linker
-namespaces. System-provided x86/x86_64 ELF files remain in the native namespace.
-In `hybrid` mode, system-provided x86/x86_64 ELF files remain in the native
-namespace and app-private native ELF follows the existing host-first routing. In
-`direct` mode, the bridged namespace owns all loads and a backend rejection is
-returned directly to ART; the native namespace is not used as a fallback. The
-returned handle records which owner must perform JNI and unload operations.
-ARM/ARM64 files and paths whose ELF type cannot be read continue through the
-selected translation backend. A single ELF dependency graph still cannot mix
-architectures.
+companion ART patch, a bridged classloader selected for `hybrid` owns both native
+and bridged linker namespaces. System-provided x86/x86_64 ELF files retain host
+ownership. App-private native ELF first goes to the selected translation backend;
+only a backend rejection falls back to the host namespace. ARM/ARM64 files and
+paths whose ELF type cannot be read continue through the selected translation
+backend. The returned handle records which owner must perform JNI and unload
+operations. `direct` creates no Floral host namespace, performs no Floral ELF
+split, and enables no Floral guest identity; ART owns the selected backend
+handle and callback table exactly as it does for a standalone NativeBridge.
+A single ELF dependency graph still cannot mix architectures.
 
 The framework integration reserves 256 MiB for 32-bit WebView RELRO creation
 by default. Products with an unusually large provider can override the byte
@@ -120,37 +132,8 @@ counts with `ro.floral.webview.vmsize32` and
 The router forwards the backend's ABI environment rather than changing global
 `ro.product.cpu.*` properties.
 
-## Diagnostics
-
-Unified diagnostics are disabled by default. A full package name is required;
-the optional library filter accepts either a full path or a basename. The
-package filter also covers child processes such as `:remote`. These `debug.*`
-properties do not survive a reboot.
-
-```shell
-adb shell setprop debug.floral.nbdiag.package com.example.app
-adb shell setprop debug.floral.nbdiag.library libsample.so
-adb logcat -s FloralNBDiag
-```
-
-Events cover backend selection and initialization, `loadLibrary` and
-`loadLibraryExt`, trampolines, the `JNI_OnLoad` result, and every method passed
-to `RegisterNatives`. Clear the package property to stop tracing immediately:
-
-```shell
-adb shell setprop debug.floral.nbdiag.package ''
-adb shell setprop debug.floral.nbdiag.library ''
-```
-
-`RegisterNatives` normally runs on the `JNI_OnLoad` thread and retains its
-library attribution. A protected loader that registers from another thread is
-reported with an `<unknown>` library while the package filter still captures
-the registration.
-
 ## Checks
 
-`floral_nativebridge_policy_test` validates policy precedence and
-`floral_nativebridge_diagnostics_test` validates package and library filters.
-The Android
+`floral_nativebridge_policy_test` validates policy precedence. The Android
 `floral_nativebridge_probe` only opens a library and checks its exported
 `NativeBridgeItf`; it never initializes two backends in one process.

@@ -74,7 +74,8 @@ int main() {
         "com.example.game": {
           "mode": "auto",
           "candidates": ["ndk", "houdini"],
-          "selected_backend": "houdini"
+          "selected_backend": "houdini",
+          "selected_loader_mode": "direct"
         }
       }
     })";
@@ -112,8 +113,11 @@ int main() {
       Check(exact.candidates.size() == 4 &&
                 exact.candidates[0].backend == floral::nativebridge::BackendKind::kHoudini &&
                 exact.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid &&
-                exact.candidates[1].mode == floral::nativebridge::LoaderMode::kDirect,
-            "candidate order") &&
+                exact.candidates[1].backend == floral::nativebridge::BackendKind::kNdk &&
+                exact.candidates[1].mode == floral::nativebridge::LoaderMode::kHybrid &&
+                exact.candidates[2].backend == floral::nativebridge::BackendKind::kHoudini &&
+                exact.candidates[2].mode == floral::nativebridge::LoaderMode::kDirect,
+            "hybrid candidates precede direct candidates") &&
       Check(process.kind == floral::nativebridge::BackendKind::kHoudini,
             "process rule") &&
       Check(fallback.kind == floral::nativebridge::BackendKind::kHoudini,
@@ -125,17 +129,19 @@ int main() {
       Check(global_executable.kind == floral::nativebridge::BackendKind::kNdk,
             "global executable rule") &&
       Check(refreshed.kind == floral::nativebridge::BackendKind::kHoudini &&
-                refreshed.candidates.size() == 2 &&
+                refreshed.loader_mode == floral::nativebridge::LoaderMode::kDirect &&
+                refreshed.candidates.size() == 1 &&
                 refreshed.candidates[0].backend == floral::nativebridge::BackendKind::kHoudini &&
-                refreshed.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid,
-            "selected backend reload") &&
+                refreshed.candidates[0].mode == floral::nativebridge::LoaderMode::kDirect,
+            "selected backend and loader mode reload") &&
       Check(preferred.kind == floral::nativebridge::BackendKind::kAuto &&
                 preferred.candidates.size() == 4 &&
                 preferred.candidates[0].backend == floral::nativebridge::BackendKind::kNdk &&
                 preferred.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid &&
-                preferred.candidates[1].backend == floral::nativebridge::BackendKind::kNdk &&
-                preferred.candidates[1].mode == floral::nativebridge::LoaderMode::kDirect &&
-                preferred.candidates[2].backend == floral::nativebridge::BackendKind::kHoudini,
+                preferred.candidates[1].backend == floral::nativebridge::BackendKind::kHoudini &&
+                preferred.candidates[1].mode == floral::nativebridge::LoaderMode::kHybrid &&
+                preferred.candidates[2].backend == floral::nativebridge::BackendKind::kNdk &&
+                preferred.candidates[2].mode == floral::nativebridge::LoaderMode::kDirect,
             "preferred backend keeps automatic fallback") &&
       Check(recovered.kind == floral::nativebridge::BackendKind::kHoudini &&
                 recovered.loader_mode == floral::nativebridge::LoaderMode::kHybrid &&
