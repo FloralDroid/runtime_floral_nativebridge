@@ -278,7 +278,23 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection) {
     SetError("NativeBridge backend candidates exhausted by Android runtime state");
     return false;
   }
-  if (!PreloadBackends()) {
+  if (selection.loader_mode == LoaderMode::kDirect) {
+    // Direct is an explicit, single-backend contract. Never walk another
+    // candidate here: doing so would reintroduce recovery and make the
+    // backend observable as a Floral-managed loader.
+    if (selection.candidates.size() != 1 ||
+        selection.candidates.front().mode != LoaderMode::kDirect ||
+        selection.candidates.front().backend == BackendKind::kAuto) {
+      SetError("direct NativeBridge policy must contain one explicit backend");
+      return false;
+    }
+    const BackendCandidate candidate = selection.candidates.front();
+    if (FindLoadedBackend(candidate.backend) == nullptr &&
+        !LoadBackend(candidate.backend, BackendPath(candidate.backend))) {
+      SetError("explicit direct NativeBridge backend could not be loaded");
+      return false;
+    }
+  } else if (!PreloadBackends()) {
     SetError("no usable NativeBridge backend could be preloaded");
     return false;
   }
