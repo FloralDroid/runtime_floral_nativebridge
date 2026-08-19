@@ -301,8 +301,6 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection) {
   const std::vector<BackendCandidate> default_candidates = {
       {BackendKind::kNdk, LoaderMode::kHybrid},
       {BackendKind::kHoudini, LoaderMode::kHybrid},
-      {BackendKind::kNdk, LoaderMode::kDirect},
-      {BackendKind::kHoudini, LoaderMode::kDirect},
   };
   const std::vector<BackendCandidate> &candidates = selection.candidates.empty()
                                                         ? default_candidates

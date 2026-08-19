@@ -19,23 +19,16 @@
 namespace floral::nativebridge {
 namespace {
 
-std::vector<BackendCandidate> ExpandCandidates(
+std::vector<BackendCandidate> HybridCandidates(
     const std::vector<BackendKind> &backends) {
   std::vector<BackendCandidate> candidates;
-  // Complete the enhanced loader pass for every configured backend before
-  // considering transparent forwarding. This keeps recovery deterministic and
-  // avoids changing the loader model between adjacent backend attempts.
+  // Automatic recovery keeps one loader model for the complete candidate pass.
+  // Direct mode remains available only through an explicit selected backend.
   for (const BackendKind backend : backends) {
     if (backend == BackendKind::kAuto) {
       continue;
     }
     candidates.push_back({backend, LoaderMode::kHybrid});
-  }
-  for (const BackendKind backend : backends) {
-    if (backend == BackendKind::kAuto) {
-      continue;
-    }
-    candidates.push_back({backend, LoaderMode::kDirect});
   }
   return candidates;
 }
@@ -49,10 +42,10 @@ BackendSelection SelectionFromJson(const Json::Value &value,
     selection.name = BackendKindName(selection.kind);
     selection.reason = std::move(reason);
     if (selection.kind == BackendKind::kAuto) {
-      selection.candidates = ExpandCandidates(
+      selection.candidates = HybridCandidates(
           {BackendKind::kNdk, BackendKind::kHoudini});
     } else {
-      selection.candidates = ExpandCandidates({selection.kind});
+      selection.candidates = HybridCandidates({selection.kind});
     }
     if (selection.kind == BackendKind::kAuto && backend != "auto") {
       LOG(WARNING) << "Unknown Floral NativeBridge backend '" << backend
@@ -101,7 +94,7 @@ BackendSelection SelectionFromJson(const Json::Value &value,
   } else if (backend_candidates.empty()) {
     backend_candidates = {BackendKind::kNdk, BackendKind::kHoudini};
   }
-  selection.candidates = ExpandCandidates(backend_candidates);
+  selection.candidates = HybridCandidates(backend_candidates);
   return selection;
 }
 
@@ -111,7 +104,7 @@ BackendSelection PreferredSelectionFromJson(const Json::Value &value,
       .kind = BackendKind::kAuto,
       .name = BackendKindName(BackendKind::kAuto),
       .reason = std::move(reason),
-      .candidates = ExpandCandidates({BackendKind::kNdk, BackendKind::kHoudini}),
+      .candidates = HybridCandidates({BackendKind::kNdk, BackendKind::kHoudini}),
   };
   if (!value.isString()) {
     LOG(WARNING) << "Floral NativeBridge preferred_backend must be ndk or houdini";
@@ -120,7 +113,7 @@ BackendSelection PreferredSelectionFromJson(const Json::Value &value,
 
   const BackendKind preferred = ParseBackendKind(value.asString());
   if (preferred == BackendKind::kHoudini) {
-    selection.candidates = ExpandCandidates(
+    selection.candidates = HybridCandidates(
         {BackendKind::kHoudini, BackendKind::kNdk});
   } else if (preferred != BackendKind::kNdk) {
     LOG(WARNING) << "Unknown Floral NativeBridge preferred backend '"
@@ -208,7 +201,7 @@ PolicyEngine PolicyEngine::Load(std::string path) {
       .kind = BackendKind::kAuto,
       .name = BackendKindName(BackendKind::kAuto),
       .reason = "built-in default",
-      .candidates = ExpandCandidates({BackendKind::kNdk, BackendKind::kHoudini}),
+      .candidates = HybridCandidates({BackendKind::kNdk, BackendKind::kHoudini}),
   };
 
   std::ifstream file(engine.path_);

@@ -91,6 +91,10 @@ int main() {
       "version": 1,
       "packages": {
         "com.example.game": {"selected_backend": "houdini"},
+        "com.direct-state.game": {
+          "selected_backend": "houdini",
+          "selected_loader_mode": "direct"
+        },
         "com.exhausted.game": {"exhausted": true}
       }
     })";
@@ -102,6 +106,8 @@ int main() {
   const auto recovered_process =
       floral::nativebridge::PolicyEngine::ApplyRuntimeState(
           exact, "com.example.game:worker", path);
+  const auto stale_direct = floral::nativebridge::PolicyEngine::ApplyRuntimeState(
+      exact, "com.direct-state.game", path);
   const auto exhausted = floral::nativebridge::PolicyEngine::ApplyRuntimeState(
       exact, "com.exhausted.game", path);
   unlink(path);
@@ -110,15 +116,16 @@ int main() {
       engine.loaded() &&
       Check(exact.kind == floral::nativebridge::BackendKind::kAuto,
             "exact process rule") &&
-      Check(exact.candidates.size() == 4 &&
+      Check(exact.candidates.size() == 2 &&
                 exact.candidates[0].backend == floral::nativebridge::BackendKind::kHoudini &&
                 exact.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid &&
                 exact.candidates[1].backend == floral::nativebridge::BackendKind::kNdk &&
-                exact.candidates[1].mode == floral::nativebridge::LoaderMode::kHybrid &&
-                exact.candidates[2].backend == floral::nativebridge::BackendKind::kHoudini &&
-                exact.candidates[2].mode == floral::nativebridge::LoaderMode::kDirect,
-            "hybrid candidates precede direct candidates") &&
-      Check(process.kind == floral::nativebridge::BackendKind::kHoudini,
+                exact.candidates[1].mode == floral::nativebridge::LoaderMode::kHybrid,
+            "automatic selection contains hybrid candidates only") &&
+      Check(process.kind == floral::nativebridge::BackendKind::kHoudini &&
+                process.loader_mode == floral::nativebridge::LoaderMode::kHybrid &&
+                process.candidates.size() == 1 &&
+                process.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid,
             "process rule") &&
       Check(fallback.kind == floral::nativebridge::BackendKind::kHoudini,
             "default rule") &&
@@ -135,13 +142,11 @@ int main() {
                 refreshed.candidates[0].mode == floral::nativebridge::LoaderMode::kDirect,
             "selected backend and loader mode reload") &&
       Check(preferred.kind == floral::nativebridge::BackendKind::kAuto &&
-                preferred.candidates.size() == 4 &&
+                preferred.candidates.size() == 2 &&
                 preferred.candidates[0].backend == floral::nativebridge::BackendKind::kNdk &&
                 preferred.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid &&
                 preferred.candidates[1].backend == floral::nativebridge::BackendKind::kHoudini &&
-                preferred.candidates[1].mode == floral::nativebridge::LoaderMode::kHybrid &&
-                preferred.candidates[2].backend == floral::nativebridge::BackendKind::kNdk &&
-                preferred.candidates[2].mode == floral::nativebridge::LoaderMode::kDirect,
+                preferred.candidates[1].mode == floral::nativebridge::LoaderMode::kHybrid,
             "preferred backend keeps automatic fallback") &&
       Check(recovered.kind == floral::nativebridge::BackendKind::kHoudini &&
                 recovered.loader_mode == floral::nativebridge::LoaderMode::kHybrid &&
@@ -152,6 +157,9 @@ int main() {
             "explicit host rule remains locked") &&
       Check(recovered_process.kind == floral::nativebridge::BackendKind::kAuto,
             "runtime state remains process-specific") &&
+      Check(stale_direct.kind == floral::nativebridge::BackendKind::kAuto &&
+                stale_direct.candidates.size() == 2,
+            "automatic selection ignores stale direct state") &&
       Check(exhausted.exhausted && exhausted.candidates.empty(),
             "runtime circuit breaker");
   return ok ? EXIT_SUCCESS : EXIT_FAILURE;

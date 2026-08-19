@@ -50,8 +50,9 @@ JNI 加载失败。
 ```
 
 `preferred_backend` 保持自动回退，并把指定的 `ndk` 或 `houdini` 放在后端首位。
-自动回退会先完整遍历所有后端的 `hybrid` 候选，再遍历 `direct` 候选；默认顺序为
-`ndk/hybrid`、`houdini/hybrid`、`ndk/direct`、`houdini/direct`。`direct` 只负责选择后端，
+自动回退的完整候选序列保持同一种增强加载模型；默认顺序为
+`ndk/hybrid`、`houdini/hybrid`。`direct` 仅允许显式对象规则同时设置
+`selected_backend` 和 `selected_loader_mode` 时使用；它只负责选择后端，
 NativeLoader namespace、库所有权和进程身份均保持 AOSP 与该后端的原始行为；
 ART 直接调用所选后端的 callbacks，不再经过 `libmixbridge` 转发。
 `default_backend`
@@ -62,13 +63,13 @@ ART 直接调用所选后端的 callbacks，不再经过 `libmixbridge` 转发�
 
 原有字符串规则继续兼容。对象规则用于保存候选顺序和可选的显式
 `selected_backend`；存在该字段时运行时只使用已选后端，Android 不会覆盖。
-显式规则可通过 `selected_loader_mode` 选择 `hybrid` 或 `direct`，缺省为
-`hybrid`。
+显式对象规则可通过 `selected_loader_mode` 选择 `hybrid` 或 `direct`，缺省为
+`hybrid`。`direct` 不参与自动监控、学习或崩溃回退。
 `auto` 规则由 Android 保存进程版本和候选结果。ARM 转译进程在启动后 60 秒内
 发生 native crash，或出现特定的 JNI `UnsatisfiedLinkError` 时，Android 会切换到
 尚未失败的下一候选。只有包含 Activity
 的前台主进程才恢复原任务；推送等 helper/service 进程只重启自身，不再销毁前台
-任务。普通 Java 崩溃、ANR、非 ARM 进程及窗口外崩溃不参与回退。每个候选在
+任务。普通 Java 崩溃、ANR、非 ARM 进程及窗口外崩溃不参与回退。每个 hybrid 后端候选在
 同一应用和系统版本中只尝试一次；候选通过 60 秒稳定窗口后会固定选择，避免把
 后续普通应用崩溃误判成转译失败。应用或系统版本变化时重置对应状态。
 
@@ -108,9 +109,37 @@ x86/x86_64 ELF 保持宿主所有权。PackageManager 会先扫描整包的公�
 identity；ART 像独立 NativeBridge 一样直接持有所选后端的 handle 和 callback 表。
 混合模式不会在同一个 ELF 依赖图中混合架构。
 
+NativeLoader 只使用 Android 计算出的公共库契约，把 guest classloader 链接到后端
+namespace。它不会通过裸 soname 预加载 `libart.so`、`libnativeloader.so` 或
+`libdl_android.so` 来代替 namespace 关系；后端运行时库始终由后端自己的 linker
+拓扑管理。
+
 框架集成默认给 32 位 WebView RELRO 创建预留 256 MiB 地址空间。使用超大
 WebView provider 的产品可以通过 `ro.floral.webview.vmsize32` 和
 `ro.floral.webview.vmsize64` 按字节覆盖；非正数会回退到默认值。
+
+## Namespace 审计
+
+配套 ART 补丁为 userdebug 和 eng 构建提供默认关闭、可持久化的 namespace 审计。
+审计不会执行额外 `dlopen`，不会拦截 JNI、采集调用栈、创建线程或维护 TLS 状态。
+启用后只记录 exported namespace 句柄、classloader namespace 创建结果、host/guest
+链接归属、列表项数量、库加载归属，以及失败时 linker 返回的原始错误。
+
+在启动待测进程前启用：
+
+```sh
+adb shell setprop persist.floral.nb.audit 1
+adb logcat -c
+adb shell am force-stop PACKAGE
+adb shell monkey -p PACKAGE 1
+adb logcat -d -v threadtime -s nativeloader:I
+```
+
+该属性和日志量会跨重启保留，采集结束后应关闭：
+
+```sh
+adb shell setprop persist.floral.nb.audit 0
+```
 
 ## 测试
 

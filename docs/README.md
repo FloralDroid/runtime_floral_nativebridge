@@ -55,10 +55,11 @@ not need access to the host file.
 ```
 
 `preferred_backend` keeps automatic recovery enabled and places `ndk` or
-`houdini` first in the backend order. Automatic recovery completes the
-`hybrid` pass for every configured backend before it starts the `direct` pass;
-for example, the default order is `ndk/hybrid`, `houdini/hybrid`,
-`ndk/direct`, `houdini/direct`. `direct` only selects the backend;
+`houdini` first in the backend order. Automatic recovery keeps the enhanced
+loader model for its complete pass; for example, the default order is
+`ndk/hybrid`, `houdini/hybrid`. `direct` is available only to an explicit
+object rule that sets both `selected_backend` and `selected_loader_mode`;
+it only selects the backend;
 NativeLoader namespaces, library ownership, and process identity retain the
 original AOSP and backend behavior while ART invokes that backend's callbacks
 without a `libmixbridge` forwarding hop. `default_backend` remains an
@@ -69,14 +70,15 @@ native loader path. Missing `abi.public` uses the ARM compatibility default.
 
 String rules remain supported. Object rules retain candidate order and an
 optional explicit `selected_backend`. Explicit selections are never overridden.
-An explicit rule may set `selected_loader_mode` to `hybrid` or `direct`; it
-defaults to `hybrid`.
+An explicit object rule may set `selected_loader_mode` to `hybrid` or `direct`;
+it defaults to `hybrid`. Direct selections are not monitored, learned, or
+entered by automatic recovery.
 For `auto`, Android records the process version and candidate results. A native
 crash or the narrow translated-JNI `UnsatisfiedLinkError` failure within 60
 seconds selects the next untried candidate. Only a foreground main process
 restores its task; push and other helper/service processes restart independently
 and no longer tear down the foreground task. Other Java crashes, ANRs, native
-processes, and later crashes are unaffected. Each backend/mode candidate is
+processes, and later crashes are unaffected. Each hybrid backend candidate is
 attempted once per application and system version. A candidate that survives the
 60-second probation window is kept, so a later ordinary application crash cannot
 poison the learned result.
@@ -126,6 +128,12 @@ Floral ELF split, and enables no Floral guest identity; ART owns the selected
 backend handle and callback table exactly as it does for a standalone NativeBridge.
 A single ELF dependency graph still cannot mix architectures.
 
+NativeLoader links a guest classloader to the backend namespace using only the
+public-library contract computed by Android. It does not preload
+`libart.so`, `libnativeloader.so`, or `libdl_android.so` by soname as a
+substitute for a namespace relationship. Backend runtime libraries remain
+private to the backend's linker topology.
+
 The framework integration reserves 256 MiB for 32-bit WebView RELRO creation
 by default. Products with an unusually large provider can override the byte
 counts with `ro.floral.webview.vmsize32` and
@@ -133,6 +141,32 @@ counts with `ro.floral.webview.vmsize32` and
 
 The router forwards the backend's ABI environment rather than changing global
 `ro.product.cpu.*` properties.
+
+## Namespace audit
+
+The companion ART patch provides a persistent, opt-in namespace audit for
+userdebug and eng builds. It is disabled by default and performs no additional
+`dlopen`, JNI interception, stack collection, thread creation, or TLS tracking.
+When enabled it records exported namespace handles, classloader namespace
+creation, host and guest link ownership, list sizes, load ownership, and the
+original linker error on failure.
+
+Enable it before starting the process under test:
+
+```sh
+adb shell setprop persist.floral.nb.audit 1
+adb logcat -c
+adb shell am force-stop PACKAGE
+adb shell monkey -p PACKAGE 1
+adb logcat -d -v threadtime -s nativeloader:I
+```
+
+Disable it after collection because the property and its log volume persist
+across reboot:
+
+```sh
+adb shell setprop persist.floral.nb.audit 0
+```
 
 ## Checks
 
