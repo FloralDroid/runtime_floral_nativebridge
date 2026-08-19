@@ -115,13 +115,15 @@ privileges are dropped, so selection does not depend on an early
 The product fragment enables `ro.floral.bridge.hybrid_elf=1`. With the
 companion ART patch, a bridged classloader selected for `hybrid` owns both native
 and bridged linker namespaces. System-provided x86/x86_64 ELF files retain host
-ownership. App-private native ELF first goes to the selected translation backend;
-only a backend rejection falls back to the host namespace. ARM/ARM64 files and
-paths whose ELF type cannot be read continue through the selected translation
-backend. The returned handle records which owner must perform JNI and unload
-operations. `direct` creates no Floral host namespace, performs no Floral ELF
-split, and enables no Floral guest identity; ART owns the selected backend
-handle and callback table exactly as it does for a standalone NativeBridge.
+ownership. PackageManager first scans the complete package for a public ARM ABI.
+If any base or split APK contains ARM native libraries, only ARM ABIs are selected
+and extracted. Host x86/x86_64 is selected only for packages with no ARM native
+libraries. Every app-private ELF in a bridged process stays with the selected
+translation backend, even if its ELF header advertises x86; it never falls back
+to the host namespace. The returned handle records which owner must perform JNI
+and unload operations. `direct` creates no Floral host namespace, performs no
+Floral ELF split, and enables no Floral guest identity; ART owns the selected
+backend handle and callback table exactly as it does for a standalone NativeBridge.
 A single ELF dependency graph still cannot mix architectures.
 
 The framework integration reserves 256 MiB for 32-bit WebView RELRO creation

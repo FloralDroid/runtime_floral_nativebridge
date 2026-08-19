@@ -99,9 +99,11 @@ system linker namespace 和 `RTLD_LAZY` 预加载，并完成 NativeBridge 接�
 
 产品片段默认启用 `ro.floral.bridge.hybrid_elf=1`。配套 ART 补丁会为
 选择 `hybrid` 的桥接 classloader 同时建立宿主和桥接 namespace；系统提供的
-x86/x86_64 ELF 保持宿主所有权。应用私有 native ELF 先交给已选择的转译后端，
-仅在后端拒绝时回退宿主 namespace。ARM/ARM64 和无法直接识别的路径交给已选择的
-转译后端。加载结果会记录真实句柄归属，确保 JNI 和卸载使用同一个所有者。
+x86/x86_64 ELF 保持宿主所有权。PackageManager 会先扫描整包的公开 ARM ABI；只要
+任一 APK 或 split 包含 ARM native 库，就只提取并选择 ARM ABI。只有完全不含 ARM、
+但包含 x86/x86_64 native 库的应用才使用宿主 ABI。桥接进程的应用私有 ELF 全部交给
+已选择的转译后端，不再因 ELF 标记为 x86 而回退宿主 namespace。加载结果会记录
+真实句柄归属，确保 JNI 和卸载使用同一个所有者。
 `direct` 不创建 Floral 宿主 namespace、不执行 ELF 分流，也不启用 Floral guest
 identity；ART 像独立 NativeBridge 一样直接持有所选后端的 handle 和 callback 表。
 混合模式不会在同一个 ELF 依赖图中混合架构。
