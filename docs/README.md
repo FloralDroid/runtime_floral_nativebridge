@@ -112,7 +112,7 @@ initialized. ART explicitly passes the nice name and app data directory before
 privileges are dropped, so selection does not depend on an early
 `/proc/self/cmdline` value.
 
-The product fragment enables `ro.floral.nativebridge.hybrid_elf=1`. With the
+The product fragment enables `ro.floral.bridge.hybrid_elf=1`. With the
 companion ART patch, a bridged classloader selected for `hybrid` owns both native
 and bridged linker namespaces. System-provided x86/x86_64 ELF files retain host
 ownership. App-private native ELF first goes to the selected translation backend;
