@@ -95,6 +95,8 @@ private:
   bool IsBackendCompatible(const LoadedBackend &backend,
                            uint32_t bridge_version) const;
   bool LoadSelectedBackend(const BackendSelection &selection);
+  bool EnsureGuestSystemNamespace(const char *instruction_set);
+  static std::string GuestSystemLibraryDirectory(const char *instruction_set);
   void SetError(std::string message) const;
 
   std::string policy_path_;
@@ -108,6 +110,8 @@ private:
   bool selection_prepared_ = false;
   bool backends_preloaded_ = false;
   bool initialized_ = false;
+  android::native_bridge_namespace_t *guest_system_namespace_ = nullptr;
+  bool guest_system_namespace_ready_ = false;
 };
 
 } // namespace floral::nativebridge

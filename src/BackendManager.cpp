@@ -45,6 +45,8 @@ constexpr int GuestArchitecture() {
 #endif
 }
 
+constexpr char kGuestSystemNamespaceName[] = "floral-guest-system";
+
 bool HasRequiredCallbacks(const android::NativeBridgeCallbacks *callbacks) {
   return callbacks != nullptr && callbacks->initialize != nullptr &&
          callbacks->loadLibrary != nullptr &&
@@ -197,6 +199,47 @@ std::string BackendManager::BackendPath(BackendKind kind) const {
     return {};
   }
   return {};
+}
+
+std::string BackendManager::GuestSystemLibraryDirectory(
+    const char *instruction_set) {
+  if (instruction_set != nullptr &&
+      (strcmp(instruction_set, "arm64") == 0 ||
+       strcmp(instruction_set, "arm64-v8a") == 0)) {
+    return "/system/lib64/arm64";
+  }
+  return "/system/lib/arm";
+}
+
+bool BackendManager::EnsureGuestSystemNamespace(const char *instruction_set) {
+  if (!UseHybridLoader() || guest_system_namespace_ready_) {
+    return guest_system_namespace_ready_;
+  }
+  if (callbacks_ == nullptr || callbacks_->createNamespace == nullptr) {
+    LOG(WARNING) << "Floral NativeBridge: selected backend cannot create a "
+                    "guest system namespace";
+    return false;
+  }
+
+  const std::string library_directory =
+      GuestSystemLibraryDirectory(instruction_set);
+  // This handle is created by the selected backend and is never passed to the
+  // host linker. Keeping the guest sysroot in one backend-owned namespace is
+  // required when a backend does not export Android's named namespaces.
+  guest_system_namespace_ = callbacks_->createNamespace(
+      kGuestSystemNamespaceName, nullptr, library_directory.c_str(), 0,
+      library_directory.c_str(), nullptr);
+  if (guest_system_namespace_ == nullptr) {
+    LOG(WARNING) << "Floral NativeBridge: failed to create guest system "
+                    "namespace for "
+                 << library_directory;
+    return false;
+  }
+
+  guest_system_namespace_ready_ = true;
+  LOG(INFO) << "Floral NativeBridge: created guest system namespace at "
+            << library_directory;
+  return true;
 }
 
 bool BackendManager::IsBackendCompatible(const LoadedBackend &backend,
@@ -365,6 +408,10 @@ bool BackendManager::Initialize(
     return false;
   }
   initialized_ = true;
+  // Hybrid routing needs an explicit guest system parent when the backend
+  // does not export a named system/default namespace. A failure is
+  // non-fatal so the original NativeBridge fallback remains available.
+  EnsureGuestSystemNamespace(instruction_set);
   return true;
 }
 
@@ -475,9 +522,18 @@ android::native_bridge_namespace_t *BackendManager::GetVendorNamespace() const {
 
 android::native_bridge_namespace_t *
 BackendManager::GetExportedNamespace(const char *name) const {
-  return callbacks_ != nullptr && callbacks_->getExportedNamespace != nullptr
-             ? callbacks_->getExportedNamespace(name)
-             : nullptr;
+  if (callbacks_ != nullptr && callbacks_->getExportedNamespace != nullptr) {
+    android::native_bridge_namespace_t *exported =
+        callbacks_->getExportedNamespace(name);
+    if (exported != nullptr) {
+      return exported;
+    }
+  }
+  if (UseHybridLoader() && guest_system_namespace_ready_ && name != nullptr &&
+      (strcmp(name, "system") == 0 || strcmp(name, "default") == 0)) {
+    return guest_system_namespace_;
+  }
+  return nullptr;
 }
 
 void BackendManager::PreZygoteFork() {
