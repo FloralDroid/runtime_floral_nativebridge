@@ -170,8 +170,9 @@ void BackendManager::ConfigureProcessContext(const char *process_name,
   // safely read Android-owned 0600 state without exposing it to applications.
   const PolicyEngine policy = PolicyEngine::Load(policy_path_);
   selection_ = policy.Select(process_name_.empty() ? package_name_ : process_name_);
+  const std::string state_key = package_name_.empty() ? process_name_ : package_name_;
   selection_ = PolicyEngine::ApplyRuntimeState(
-      std::move(selection_), process_name_.empty() ? package_name_ : process_name_);
+      std::move(selection_), state_key);
   selection_prepared_ = true;
 
   // Guest identity is part of Floral's hybrid enhancement. Direct mode must
@@ -337,7 +338,25 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection) {
       SetError("explicit direct NativeBridge backend could not be loaded");
       return false;
     }
-  } else if (!PreloadBackends()) {
+    const LoadedBackend *backend = FindLoadedBackend(candidate.backend);
+    if (backend == nullptr) {
+      SetError("explicit direct NativeBridge backend disappeared after loading");
+      return false;
+    }
+    callbacks_ = backend->callbacks;
+    selection_.kind = candidate.backend;
+    selection_.loader_mode = LoaderMode::kDirect;
+    selection_.name = BackendKindName(candidate.backend);
+    selection_.reason = selection.reason;
+    selected_path_ = backend->path;
+    LOG(INFO) << "Selected " << selection_.name
+              << " NativeBridge backend in direct mode from " << selected_path_
+              << " (interface v" << callbacks_->version << ")";
+    // Direct mode is a transparent single-backend contract. Do not continue
+    // into the hybrid candidate loop or initialize Floral guest namespaces.
+    return true;
+  }
+  if (!PreloadBackends()) {
     SetError("no usable NativeBridge backend could be preloaded");
     return false;
   }

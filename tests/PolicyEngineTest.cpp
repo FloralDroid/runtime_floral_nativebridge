@@ -49,7 +49,7 @@ int main() {
             "libzs-local.so": "houdini"
           }
         },
-        "com.example.game:remote": "houdini"
+        "com.example.game:remote": "ndk"
       }
     })";
   }
@@ -88,7 +88,7 @@ int main() {
   {
     std::ofstream state(path, std::ios::trunc);
     state << R"({
-      "version": 1,
+      "version": 4,
       "packages": {
         "com.example.game": {"selected_backend": "houdini"},
         "com.direct-state.game": {
@@ -102,7 +102,7 @@ int main() {
   const auto recovered = floral::nativebridge::PolicyEngine::ApplyRuntimeState(
       exact, "com.example.game", path);
   const auto locked = floral::nativebridge::PolicyEngine::ApplyRuntimeState(
-      process, "com.example.game", path);
+      refreshed, "com.example.game", path);
   const auto recovered_process =
       floral::nativebridge::PolicyEngine::ApplyRuntimeState(
           exact, "com.example.game:worker", path);
@@ -122,11 +122,11 @@ int main() {
                 exact.candidates[1].backend == floral::nativebridge::BackendKind::kNdk &&
                 exact.candidates[1].mode == floral::nativebridge::LoaderMode::kHybrid,
             "automatic selection contains hybrid candidates only") &&
-      Check(process.kind == floral::nativebridge::BackendKind::kHoudini &&
-                process.loader_mode == floral::nativebridge::LoaderMode::kHybrid &&
-                process.candidates.size() == 1 &&
-                process.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid,
-            "process rule") &&
+      Check(process.kind == floral::nativebridge::BackendKind::kAuto &&
+                process.candidates.size() == exact.candidates.size() &&
+                process.candidates[0].backend == exact.candidates[0].backend &&
+                process.candidates[1].backend == exact.candidates[1].backend,
+            "package rule has authority over child process rule") &&
       Check(fallback.kind == floral::nativebridge::BackendKind::kHoudini,
             "default rule") &&
       Check(executable.kind == floral::nativebridge::BackendKind::kHoudini,
@@ -153,6 +153,7 @@ int main() {
                 recovered.reason == "Android runtime state",
             "runtime recovery state") &&
       Check(locked.kind == floral::nativebridge::BackendKind::kHoudini &&
+                locked.loader_mode == floral::nativebridge::LoaderMode::kDirect &&
                 locked.reason == "process rule",
             "explicit host rule remains locked") &&
       Check(recovered_process.kind == floral::nativebridge::BackendKind::kAuto,

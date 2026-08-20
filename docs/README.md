@@ -23,8 +23,9 @@ and JNI-loader failures.
 The optional host policy is `/ipc/floral_stream/nativebridge.json`. Init copies
 it into an Android-private cache at every boot.
 Missing or malformed files use the built-in `auto` policy. `auto` tries NDK
-Translation first and Houdini second. A process rule matches the full process
-name first and then the package portion before `:`. Restart the container after
+Translation first and Houdini second. Package rules take precedence over
+same-package process rules, and helper processes inherit the package selection.
+Restart the container after
 changing the host file so init refreshes the cache. Android application UIDs do
 not need access to the host file.
 
@@ -73,7 +74,8 @@ optional explicit `selected_backend`. Explicit selections are never overridden.
 An explicit object rule may set `selected_loader_mode` to `hybrid` or `direct`;
 it defaults to `hybrid`. Direct selections are not monitored, learned, or
 entered by automatic recovery.
-For `auto`, Android records the process version and candidate results. A native
+For `auto`, Android records the package version and `backend/loader_mode`
+candidate results. A native
 crash or the narrow translated-JNI `UnsatisfiedLinkError` failure within 60
 seconds selects the next untried candidate. Only a foreground main process
 restores its task; push and other helper/service processes restart independently

@@ -267,18 +267,20 @@ PolicyEngine PolicyEngine::Load(std::string path) {
 }
 
 BackendSelection PolicyEngine::Select(std::string_view process_name) const {
-  const auto exact = process_selections_.find(std::string(process_name));
-  if (exact != process_selections_.end()) {
-    return exact->second;
-  }
-
   const size_t separator = process_name.find(':');
   if (separator != std::string_view::npos) {
+    // A package rule is the authority for every process in that package. This
+    // prevents a helper process from silently selecting another backend.
     const auto package = process_selections_.find(
         std::string(process_name.substr(0, separator)));
     if (package != process_selections_.end()) {
       return package->second;
     }
+  }
+
+  const auto exact = process_selections_.find(std::string(process_name));
+  if (exact != process_selections_.end()) {
+    return exact->second;
   }
   return default_selection_;
 }
@@ -294,18 +296,21 @@ BackendSelection PolicyEngine::SelectExecutable(
     return std::string(process_name.substr(0, separator));
   }();
 
-  // Prefer an exact process rule, then the package rule. A path rule is only
-  // accepted when its package marker is present in the executable path.
+  // Package-owned executable rules are authoritative for every process in the
+  // package. A path rule is only accepted when its package marker is present.
   for (const ExecutableRule &rule : executable_rules_) {
-    if (rule.owner.empty()) {
+    if (rule.owner.empty() || package.empty() || rule.owner != package ||
+        !MatchesExecutable(rule.pattern, executable_path) ||
+        !PathBelongsToOwner(executable_path, package)) {
       continue;
     }
-    const bool process_match = rule.owner == process_name;
-    const bool package_match = rule.owner == package && !package.empty();
-    if ((!process_match && !package_match) ||
+    return rule.selection;
+  }
+
+  for (const ExecutableRule &rule : executable_rules_) {
+    if (rule.owner.empty() || rule.owner != process_name ||
         !MatchesExecutable(rule.pattern, executable_path) ||
-        !PathBelongsToOwner(executable_path, package_match ? package
-                                                            : rule.owner)) {
+        !PathBelongsToOwner(executable_path, rule.owner)) {
       continue;
     }
     return rule.selection;
@@ -361,8 +366,9 @@ BackendSelection PolicyEngine::ApplyRuntimeState(BackendSelection selection,
     return selection;
   }
 
-  if (root["version"].isInt() && root["version"].asInt() > 3) {
-    LOG(WARNING) << "Unsupported Floral NativeBridge state version in " << path;
+  if (!root["version"].isInt() || root["version"].asInt() != 4) {
+    LOG(WARNING) << "Ignoring Floral NativeBridge state with unsupported version in "
+                 << path;
     return selection;
   }
 

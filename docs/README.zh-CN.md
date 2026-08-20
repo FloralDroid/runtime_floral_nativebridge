@@ -20,7 +20,7 @@ JNI 加载失败。
 宿主可选策略文件为 `/ipc/floral_stream/nativebridge.json`。init 在每次开机将其
 复制到 Android 私有缓存。文件缺失或
 格式错误时使用内置 `auto` 策略：先尝试 NDK Translation，再尝试 Houdini。
-进程规则先匹配完整进程名，再匹配 `:` 前的包名。修改宿主策略后需要重启容器
+包规则优先于同包的进程规则，同包子进程继承包级后端选择。修改宿主策略后需要重启容器
 刷新缓存，Android 应用无需读取宿主文件。
 
 ```json
@@ -65,7 +65,7 @@ ART 直接调用所选后端的 callbacks，不再经过 `libmixbridge` 转发�
 `selected_backend`；存在该字段时运行时只使用已选后端，Android 不会覆盖。
 显式对象规则可通过 `selected_loader_mode` 选择 `hybrid` 或 `direct`，缺省为
 `hybrid`。`direct` 不参与自动监控、学习或崩溃回退。
-`auto` 规则由 Android 保存进程版本和候选结果。ARM 转译进程在启动后 60 秒内
+`auto` 规则由 Android 按包保存版本、后端和 loader mode 候选结果。ARM 转译进程在启动后 60 秒内
 发生 native crash，或出现特定的 JNI `UnsatisfiedLinkError` 时，Android 会切换到
 尚未失败的下一候选。只有包含 Activity
 的前台主进程才恢复原任务；推送等 helper/service 进程只重启自身，不再销毁前台
