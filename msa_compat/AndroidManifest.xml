@@ -1,0 +1,16 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.mdid.msa">
+
+    <application
+        android:label="MSA Compatibility Service"
+        android:allowBackup="false"
+        android:supportsRtl="true">
+        <service
+            android:name=".service.MsaIdService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.bun.msa.action.bindto.service" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

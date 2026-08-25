@@ -1,0 +1,26 @@
+package {
+    default_applicable_licenses: ["floral_msa_compat_license"],
+}
+
+license {
+    name: "floral_msa_compat_license",
+    visibility: ["//visibility:public"],
+    license_kinds: ["SPDX-license-identifier-Apache-2.0"],
+    license_text: ["NOTICE"],
+}
+
+android_app {
+    name: "floral_msa_compat",
+    manifest: "AndroidManifest.xml",
+    srcs: [
+        "src/**/*.java",
+        "aidl/**/*.aidl",
+    ],
+    aidl: {
+        local_include_dirs: ["aidl"],
+    },
+    sdk_version: "current",
+    certificate: "platform",
+    privileged: true,
+    product_specific: true,
+}

@@ -1,0 +1,8 @@
+on post-fs-data
+    # The host policy is a boot-scoped input. Runtime candidate state stays in
+    # system_server memory and is passed to each zygote child explicitly.
+    mkdir /data/system/floral 0700 system system
+    copy /ipc/floral_stream/nativebridge.json /data/system/floral/nativebridge-policy.json
+    chown system system /data/system/floral/nativebridge-policy.json
+    chmod 0600 /data/system/floral/nativebridge-policy.json
+    rm /data/system/floral/nativebridge-state.json
