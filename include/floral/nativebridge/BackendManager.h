@@ -75,7 +75,10 @@ public:
   BackendKind selected_kind() const { return selection_.kind; }
   LoaderMode selected_loader_mode() const { return selection_.loader_mode; }
   bool UseHybridLoader() const {
-    return selection_.loader_mode == LoaderMode::kHybrid;
+    return selection_prepared_ && selection_.loader_mode == LoaderMode::kHybrid;
+  }
+  bool UseDirectLoader() const {
+    return selection_prepared_ && selection_.loader_mode == LoaderMode::kDirect;
   }
   const std::string &selected_path() const { return selected_path_; }
 
@@ -89,6 +92,7 @@ private:
 
   std::string ProcessName() const;
   static std::string PackageNameFromDataDir(const char *app_data_dir);
+  std::string EffectiveInstructionSet(const char *instruction_set) const;
   std::string BackendPath(BackendKind kind) const;
   bool LoadBackend(BackendKind kind, const std::string &path);
   const LoadedBackend *FindLoadedBackend(BackendKind kind) const;

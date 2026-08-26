@@ -7,8 +7,15 @@
 
 #include "floral/nativebridge/BackendManager.h"
 
+#include <android-base/logging.h>
+#include <android-base/properties.h>
+
 namespace floral::nativebridge {
 namespace {
+
+bool AuditEnabled() {
+  return android::base::GetBoolProperty("persist.floral.nb.audit", false);
+}
 
 BackendManager &Manager() {
   // ART calls NativeBridge callbacks from a single initialized bridge instance.
@@ -99,6 +106,8 @@ void PreZygoteFork() { Manager().PreZygoteFork(); }
 
 bool UseHybridLoader() { return Manager().UseHybridLoader(); }
 
+bool UseDirectLoader() { return Manager().UseDirectLoader(); }
+
 const char *PrepareDirectBackend() {
   if (!Manager().PrepareDirectBackend()) {
     return nullptr;
@@ -114,14 +123,36 @@ const char *PrepareDirectBackend() {
 extern "C" void FloralNativeBridgeSetProcessContext(const char *process_name,
                                                     const char *app_data_dir,
                                                     const char *selected_backend) {
+  if (AuditEnabled()) {
+    LOG(INFO) << "Floral NativeBridge audit: router context process="
+              << (process_name == nullptr ? "<null>" : process_name)
+              << " selected="
+              << (selected_backend == nullptr ? "<null>" : selected_backend);
+  }
   floral::nativebridge::ConfigureProcessContext(process_name, app_data_dir,
-                                                selected_backend);
+                                                 selected_backend);
 }
 
 // ART uses this per-process bit only to enable Floral's hybrid enhancement.
 // A false result leaves the platform NativeLoader behavior unchanged.
 extern "C" bool FloralNativeBridgeUseHybridLoader() {
-  return floral::nativebridge::UseHybridLoader();
+  const bool use_hybrid = floral::nativebridge::UseHybridLoader();
+  if (AuditEnabled()) {
+    LOG(INFO) << "Floral NativeBridge audit: router hybrid=" << use_hybrid;
+  }
+  return use_hybrid;
+}
+
+extern "C" bool FloralNativeBridgeUseDirectLoader() {
+  const bool use_direct = floral::nativebridge::UseDirectLoader();
+  if (AuditEnabled()) {
+    LOG(INFO) << "Floral NativeBridge audit: router direct=" << use_direct;
+  }
+  return use_direct;
+}
+
+extern "C" bool FloralNativeBridgeUseCompatibilityLoader() {
+  return FloralNativeBridgeUseDirectLoader();
 }
 
 // ART calls this after process context selection and before pre-initializing

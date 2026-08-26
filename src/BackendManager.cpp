@@ -45,6 +45,11 @@ constexpr int GuestArchitecture() {
 }
 
 constexpr char kGuestSystemNamespaceName[] = "floral-guest-system";
+constexpr char kAuditProperty[] = "persist.floral.nb.audit";
+
+bool AuditEnabled() {
+  return android::base::GetBoolProperty(kAuditProperty, false);
+}
 
 bool HasRequiredCallbacks(const android::NativeBridgeCallbacks *callbacks) {
   return callbacks != nullptr && callbacks->initialize != nullptr &&
@@ -137,6 +142,16 @@ const char *BackendManager::GetError() const {
 
 std::string BackendManager::ProcessName() const { return ReadProcessName(); }
 
+std::string BackendManager::EffectiveInstructionSet(
+    const char *instruction_set) const {
+  const std::string requested = instruction_set == nullptr ? "" : instruction_set;
+  if (!UseHybridLoader() ||
+      (requested != "x86" && requested != "x86_64")) {
+    return requested;
+  }
+  return sizeof(void *) == 8 ? "arm64" : "arm";
+}
+
 std::string BackendManager::PackageNameFromDataDir(const char *app_data_dir) {
   if (app_data_dir == nullptr || *app_data_dir == '\0') {
     return {};
@@ -152,7 +167,20 @@ std::string BackendManager::PackageNameFromDataDir(const char *app_data_dir) {
 void BackendManager::ConfigureProcessContext(const char *process_name,
                                              const char *app_data_dir,
                                              const char *selected_backend) {
+  if (AuditEnabled()) {
+    LOG(INFO) << "Floral NativeBridge audit: ConfigureProcessContext process="
+              << (process_name == nullptr ? "<null>" : process_name)
+              << " data_dir=" << (app_data_dir == nullptr ? "<null>" : app_data_dir)
+              << " selected="
+              << (selected_backend == nullptr ? "<null>" : selected_backend)
+              << " callbacks=" << (callbacks_ != nullptr)
+              << " initialized=" << initialized_;
+  }
   if (callbacks_ != nullptr || initialized_) {
+    if (AuditEnabled()) {
+      LOG(INFO) << "Floral NativeBridge audit: ConfigureProcessContext ignored"
+                << " reason=already_initialized";
+    }
     return;
   }
   process_name_ = process_name == nullptr ? "" : process_name;
@@ -171,17 +199,28 @@ void BackendManager::ConfigureProcessContext(const char *process_name,
                                          : selected_backend_override_.substr(0, separator);
     const BackendKind selected = ParseBackendKind(backend_name);
     if (selected != BackendKind::kAuto) {
+      const LoaderMode selected_mode = separator == std::string::npos
+                                           ? LoaderMode::kHybrid
+                                           : ParseLoaderMode(
+                                                 selected_backend_override_.substr(
+                                                     separator + 1));
       selection_.kind = selected;
-      selection_.loader_mode = LoaderMode::kHybrid;
+      selection_.loader_mode = selected_mode;
       selection_.name = BackendKindName(selected);
       selection_.reason = "system server process selection";
-      selection_.candidates = {{selected, LoaderMode::kHybrid}};
+      selection_.candidates = {{selected, selected_mode}};
     } else {
       LOG(WARNING) << "Floral NativeBridge: ignoring invalid process backend "
                    << selected_backend_override_;
     }
   }
   selection_prepared_ = true;
+  if (AuditEnabled()) {
+    LOG(INFO) << "Floral NativeBridge audit: selection backend="
+              << BackendKindName(selection_.kind)
+              << " mode=" << LoaderModeName(selection_.loader_mode)
+              << " candidates=" << selection_.candidates.size();
+  }
 
   // Guest identity is part of Floral's hybrid enhancement. Direct mode must
   // preserve the selected backend's original process identity and loader
@@ -276,11 +315,19 @@ bool BackendManager::IsBackendCompatible(const LoadedBackend &backend,
 }
 
 bool BackendManager::LoadBackend(BackendKind kind, const std::string &path) {
+  if (AuditEnabled()) {
+    LOG(INFO) << "Floral NativeBridge audit: LoadBackend requested="
+              << BackendKindName(kind) << " path=" << path
+              << " loaded_count=" << loaded_backends_.size();
+  }
   if (path.empty()) {
     return false;
   }
-  if (!loaded_backends_.empty()) {
-    return FindLoadedBackend(kind) != nullptr;
+  if (FindLoadedBackend(kind) != nullptr) {
+    if (AuditEnabled()) {
+      LOG(INFO) << "Floral NativeBridge audit: LoadBackend reused_existing=true";
+    }
+    return true;
   }
 
   void *handle = OpenBackendLibrary(path);
@@ -432,15 +479,23 @@ bool BackendManager::PrepareDirectBackend() {
 bool BackendManager::Initialize(
     const android::NativeBridgeRuntimeCallbacks *runtime_callbacks,
     const char *private_dir, const char *instruction_set) {
+  if (AuditEnabled()) {
+    LOG(INFO) << "Floral NativeBridge audit: Initialize instruction_set="
+              << (instruction_set == nullptr ? "<null>" : instruction_set)
+              << " selection_prepared=" << selection_prepared_
+              << " callbacks=" << (callbacks_ != nullptr)
+              << " initialized=" << initialized_;
+  }
   if (initialized_) {
     return true;
   }
   instruction_set_ = instruction_set == nullptr ? "" : instruction_set;
+  instruction_set_ = EffectiveInstructionSet(instruction_set_.c_str());
   if (!EnsureLoaded() || callbacks_->initialize == nullptr) {
     return false;
   }
   if (!callbacks_->initialize(runtime_callbacks, private_dir,
-                              instruction_set)) {
+                              instruction_set_.c_str())) {
     SetError("selected backend initialization failed");
     return false;
   }
@@ -448,7 +503,7 @@ bool BackendManager::Initialize(
   // Hybrid routing needs an explicit guest system parent when the backend
   // does not export a named system/default namespace. A failure is
   // non-fatal so the original NativeBridge fallback remains available.
-  EnsureGuestSystemNamespace(instruction_set);
+  EnsureGuestSystemNamespace(instruction_set_.c_str());
   return true;
 }
 
@@ -485,7 +540,7 @@ bool BackendManager::IsSupported(const char *path) const {
 const android::NativeBridgeRuntimeValues *
 BackendManager::GetAppEnv(const char *instruction_set) const {
   return callbacks_ != nullptr && callbacks_->getAppEnv != nullptr
-             ? callbacks_->getAppEnv(instruction_set)
+             ? callbacks_->getAppEnv(EffectiveInstructionSet(instruction_set).c_str())
              : nullptr;
 }
 
@@ -565,6 +620,11 @@ BackendManager::GetExportedNamespace(const char *name) const {
 }
 
 void BackendManager::PreZygoteFork() {
+  if (AuditEnabled()) {
+    LOG(INFO) << "Floral NativeBridge audit: PreZygoteFork callbacks="
+              << (callbacks_ != nullptr) << " initialized=" << initialized_
+              << " loaded_count=" << loaded_backends_.size();
+  }
   // Payloads are deliberately not loaded in zygote. Their constructors and
   // callback state must belong to exactly one application process.
 }
