@@ -123,7 +123,7 @@ const char *PrepareDirectBackend() {
 extern "C" void FloralNativeBridgeSetProcessContext(const char *process_name,
                                                     const char *app_data_dir,
                                                     const char *selected_backend) {
-  if (AuditEnabled()) {
+  if (floral::nativebridge::AuditEnabled()) {
     LOG(INFO) << "Floral NativeBridge audit: router context process="
               << (process_name == nullptr ? "<null>" : process_name)
               << " selected="
@@ -137,7 +137,7 @@ extern "C" void FloralNativeBridgeSetProcessContext(const char *process_name,
 // A false result leaves the platform NativeLoader behavior unchanged.
 extern "C" bool FloralNativeBridgeUseHybridLoader() {
   const bool use_hybrid = floral::nativebridge::UseHybridLoader();
-  if (AuditEnabled()) {
+  if (floral::nativebridge::AuditEnabled()) {
     LOG(INFO) << "Floral NativeBridge audit: router hybrid=" << use_hybrid;
   }
   return use_hybrid;
@@ -145,7 +145,7 @@ extern "C" bool FloralNativeBridgeUseHybridLoader() {
 
 extern "C" bool FloralNativeBridgeUseDirectLoader() {
   const bool use_direct = floral::nativebridge::UseDirectLoader();
-  if (AuditEnabled()) {
+  if (floral::nativebridge::AuditEnabled()) {
     LOG(INFO) << "Floral NativeBridge audit: router direct=" << use_direct;
   }
   return use_direct;
