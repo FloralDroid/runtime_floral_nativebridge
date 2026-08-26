@@ -38,6 +38,7 @@ cc_library_shared {
     shared_libs: [
         "libbase",
         "libdl",
+        "libdl_android",
         "libjsoncpp",
         "liblog",
     ],

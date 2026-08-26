@@ -29,8 +29,7 @@ constexpr uint32_t kMaxNativeBridgeVersion = 6;
 
 extern "C" void __floral_nativebridge_set_guest_arch(int arch)
     __attribute__((weak));
-extern "C" android_namespace_t *android_get_exported_namespace(const char *name)
-    __attribute__((weak));
+extern "C" android_namespace_t *android_get_exported_namespace(const char *name);
 
 enum FloralGuestArchitecture : int {
   kFloralGuestArm = 1,
@@ -89,11 +88,6 @@ std::string ArchitectureLibraryDirectory() {
 void *OpenBackendLibrary(const std::string &path) {
   // A backend payload has a guest linker topology. Loading it through the
   // caller namespace can bind guest dependencies to host x86 libraries.
-  if (android_get_exported_namespace == nullptr) {
-    LOG(ERROR) << "Floral NativeBridge: exported namespace lookup unavailable "
-               << "for " << path;
-    return nullptr;
-  }
   android_namespace_t *library_namespace =
       android_get_exported_namespace("system");
   if (library_namespace == nullptr) {
