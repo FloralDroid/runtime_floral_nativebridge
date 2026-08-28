@@ -222,17 +222,6 @@ void BackendManager::ConfigureProcessContext(const char *process_name,
               << " mode=" << LoaderModeName(selection_.loader_mode)
               << " candidates=" << selection_.candidates.size();
   }
-
-  // Guest identity is part of Floral's hybrid enhancement. Direct mode must
-  // preserve the selected backend's original process identity and loader
-  // behavior. Weak binding keeps hybrid usable on older incremental images.
-  if (selection_.loader_mode == LoaderMode::kHybrid) {
-    if (__floral_nativebridge_set_guest_arch != nullptr) {
-      __floral_nativebridge_set_guest_arch(GuestArchitecture());
-    } else {
-      LOG(WARNING) << "Floral NativeBridge: libc guest identity hook unavailable";
-    }
-  }
 }
 
 std::string BackendManager::BackendPath(BackendKind kind) const {
@@ -289,13 +278,35 @@ BackendKind BackendManager::InstalledBackend(const char *instruction_set) const 
 }
 
 std::string BackendManager::GuestSystemLibraryDirectory(
-    const char *instruction_set) {
-  if (instruction_set != nullptr &&
+    BackendKind kind, const char *instruction_set) const {
+  const bool guest_arm64 =
+      instruction_set != nullptr &&
       (strcmp(instruction_set, "arm64") == 0 ||
-       strcmp(instruction_set, "arm64-v8a") == 0)) {
-    return "/system/lib64/arm64";
+       strcmp(instruction_set, "arm64-v8a") == 0);
+  const std::string backend_path = BackendPath(kind);
+  const size_t separator = backend_path.find_last_of('/');
+  if (separator == std::string::npos) {
+    return {};
   }
-  return "/system/lib/arm";
+
+  std::string backend_library_directory = backend_path.substr(0, separator);
+  const std::string host_library_directory = sizeof(void *) == 8
+                                                  ? "/lib64"
+                                                  : "/lib";
+  if (backend_library_directory.size() < host_library_directory.size() ||
+      backend_library_directory.compare(
+          backend_library_directory.size() - host_library_directory.size(),
+          host_library_directory.size(), host_library_directory) != 0) {
+    return {};
+  }
+  backend_library_directory.erase(
+      backend_library_directory.size() - host_library_directory.size());
+  if (backend_library_directory.empty()) {
+    return {};
+  }
+
+  return backend_library_directory +
+         (guest_arm64 ? "/lib64/arm64" : "/lib/arm");
 }
 
 bool BackendManager::CandidateSupportsInstructionSet(
@@ -322,7 +333,16 @@ bool BackendManager::EnsureGuestSystemNamespace(const char *instruction_set) {
   }
 
   const std::string library_directory =
-      GuestSystemLibraryDirectory(instruction_set);
+      GuestSystemLibraryDirectory(selection_.kind, instruction_set);
+  if (library_directory.empty() ||
+      access(library_directory.c_str(), R_OK | X_OK) != 0) {
+    LOG(WARNING) << "Floral NativeBridge: guest system library directory is "
+                    "unavailable for "
+                 << BackendKindName(selection_.kind) << ": "
+                 << (library_directory.empty() ? "<empty>" : library_directory)
+                 << " (errno=" << errno << ")";
+    return false;
+  }
   // This handle is created by the selected backend and is never passed to the
   // host linker. Keeping the guest sysroot in one backend-owned namespace is
   // required when a backend does not export Android's named namespaces.
@@ -547,7 +567,18 @@ bool BackendManager::Initialize(
   // Hybrid routing needs an explicit guest system parent when the backend
   // does not export a named system/default namespace. A failure is
   // non-fatal so the original NativeBridge fallback remains available.
-  EnsureGuestSystemNamespace(instruction_set_.c_str());
+  const bool guest_namespace_ready =
+      EnsureGuestSystemNamespace(instruction_set_.c_str());
+  // Keep the host identity while the backend initializes. NDK translation
+  // resolves libc symbols during initialize(), so exposing the guest identity
+  // earlier can make it resolve against the wrong libc namespace.
+  if (selection_.loader_mode == LoaderMode::kHybrid && guest_namespace_ready) {
+    if (__floral_nativebridge_set_guest_arch != nullptr) {
+      __floral_nativebridge_set_guest_arch(GuestArchitecture());
+    } else {
+      LOG(WARNING) << "Floral NativeBridge: libc guest identity hook unavailable";
+    }
+  }
   return true;
 }
 

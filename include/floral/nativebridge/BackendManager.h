@@ -105,7 +105,8 @@ private:
   static bool CandidateSupportsInstructionSet(BackendKind kind,
                                               const char *instruction_set);
   bool EnsureGuestSystemNamespace(const char *instruction_set);
-  static std::string GuestSystemLibraryDirectory(const char *instruction_set);
+  std::string GuestSystemLibraryDirectory(BackendKind kind,
+                                          const char *instruction_set) const;
   void SetError(std::string message) const;
 
   std::string process_name_;
