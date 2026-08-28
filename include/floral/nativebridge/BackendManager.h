@@ -94,6 +94,8 @@ private:
   static std::string PackageNameFromDataDir(const char *app_data_dir);
   std::string EffectiveInstructionSet(const char *instruction_set) const;
   std::string BackendPath(BackendKind kind) const;
+  bool BackendAvailable(BackendKind kind) const;
+  BackendKind InstalledBackend(const char *instruction_set) const;
   bool LoadBackend(BackendKind kind, const std::string &path);
   const LoadedBackend *FindLoadedBackend(BackendKind kind) const;
   bool IsBackendCompatible(const LoadedBackend &backend,
@@ -106,7 +108,6 @@ private:
   static std::string GuestSystemLibraryDirectory(const char *instruction_set);
   void SetError(std::string message) const;
 
-  std::string policy_path_;
   std::string process_name_;
   std::string package_name_;
   std::string selected_backend_override_;

@@ -32,21 +32,20 @@
 
 namespace {
 
-constexpr char kRunnerPolicyProperty[] =
-    "ro.floral.nativebridge.runner.policy";
 constexpr char kNdk32RunnerProperty[] = "ro.floral.nativebridge.runner.ndk32";
 constexpr char kNdk64RunnerProperty[] = "ro.floral.nativebridge.runner.ndk64";
 constexpr char kHoudini32RunnerProperty[] =
     "ro.floral.nativebridge.runner.houdini32";
 constexpr char kHoudini64RunnerProperty[] =
     "ro.floral.nativebridge.runner.houdini64";
-constexpr char kDefaultRunnerPolicy[] = "/ipc/floral_stream/nativebridge.json";
+constexpr char kDefaultBackendProperty[] =
+    "ro.floral.nativebridge.default_backend";
 constexpr char kDefaultNdk32Runner[] =
-    "/system/bin/ndk_translation_program_runner_binfmt_misc";
+    "/system/floral/ndk/bin/ndk_translation_program_runner_binfmt_misc";
 constexpr char kDefaultNdk64Runner[] =
-    "/system/bin/ndk_translation_program_runner_binfmt_misc_arm64";
-constexpr char kDefaultHoudini32Runner[] = "/system/bin/houdini";
-constexpr char kDefaultHoudini64Runner[] = "/system/bin/houdini64";
+    "/system/floral/ndk/bin/ndk_translation_program_runner_binfmt_misc_arm64";
+constexpr char kDefaultHoudini32Runner[] = "/system/floral/houdini/bin/houdini";
+constexpr char kDefaultHoudini64Runner[] = "/system/floral/houdini/bin/houdini64";
 
 enum class ElfClass {
   kUnknown,
@@ -98,10 +97,57 @@ std::string RunnerPath(floral::nativebridge::BackendKind backend,
   return {};
 }
 
-std::string PolicyPath() {
-  const std::string configured =
-      android::base::GetProperty(kRunnerPolicyProperty, "");
-  return configured.empty() ? kDefaultRunnerPolicy : configured;
+const char *BackendLibraryDirectory(
+    floral::nativebridge::BackendKind backend, ElfClass elf_class) {
+  switch (backend) {
+  case floral::nativebridge::BackendKind::kNdk:
+    return elf_class == ElfClass::k32 ? "/system/floral/ndk/lib"
+                                      : "/system/floral/ndk/lib64";
+  case floral::nativebridge::BackendKind::kHoudini:
+    return elf_class == ElfClass::k32 ? "/system/floral/houdini/lib"
+                                      : "/system/floral/houdini/lib64";
+  case floral::nativebridge::BackendKind::kAuto:
+    return nullptr;
+  }
+  return nullptr;
+}
+
+floral::nativebridge::BackendKind DefaultBackend(ElfClass elf_class) {
+  if (elf_class == ElfClass::k32) {
+    return floral::nativebridge::BackendKind::kHoudini;
+  }
+
+  const char *process_backend = getenv("FLORAL_NATIVEBRIDGE_BACKEND");
+  const auto process_kind = process_backend == nullptr
+                                ? floral::nativebridge::BackendKind::kAuto
+                                : floral::nativebridge::ParseBackendKind(process_backend);
+  if (process_kind != floral::nativebridge::BackendKind::kAuto) {
+    return process_kind;
+  }
+
+  const std::string configured = android::base::GetProperty(
+      kDefaultBackendProperty, "auto");
+  if (configured == "auto") {
+    return elf_class == ElfClass::k64
+               ? floral::nativebridge::BackendKind::kNdk
+               : floral::nativebridge::BackendKind::kHoudini;
+  }
+  return floral::nativebridge::ParseBackendKind(configured) ==
+                 floral::nativebridge::BackendKind::kNdk
+             ? floral::nativebridge::BackendKind::kNdk
+             : floral::nativebridge::BackendKind::kHoudini;
+}
+
+bool AutoBackendConfigured() {
+  return getenv("FLORAL_NATIVEBRIDGE_BACKEND") == nullptr &&
+         android::base::GetProperty(kDefaultBackendProperty, "auto") == "auto";
+}
+
+floral::nativebridge::BackendKind AlternateBackend(
+    floral::nativebridge::BackendKind backend) {
+  return backend == floral::nativebridge::BackendKind::kNdk
+             ? floral::nativebridge::BackendKind::kHoudini
+             : floral::nativebridge::BackendKind::kNdk;
 }
 
 bool IsSelf(const std::string &path) {
@@ -112,15 +158,25 @@ bool IsSelf(const std::string &path) {
 }
 
 int ExecBackend(const std::string &runner, int argc, char **argv,
-                const char *backend) {
+                floral::nativebridge::BackendKind backend,
+                ElfClass elf_class) {
+  const char *backend_name = floral::nativebridge::BackendKindName(backend);
   if (runner.empty() || IsSelf(runner)) {
-    LOG(WARNING) << "Floral NativeBridge runner unavailable for " << backend
+    LOG(WARNING) << "Floral NativeBridge runner unavailable for " << backend_name
                  << ": " << runner;
     return -1;
   }
   if (access(runner.c_str(), X_OK) != 0) {
-    LOG(WARNING) << "Floral NativeBridge runner unavailable for " << backend
+    LOG(WARNING) << "Floral NativeBridge runner unavailable for " << backend_name
                  << ": " << runner << " (" << strerror(errno) << ")";
+    return -1;
+  }
+
+  const char *library_directory = BackendLibraryDirectory(backend, elf_class);
+  if (library_directory == nullptr ||
+      setenv("LD_LIBRARY_PATH", library_directory, 1) != 0) {
+    LOG(ERROR) << "Unable to configure Floral NativeBridge library path for "
+               << backend_name << ": " << strerror(errno);
     return -1;
   }
 
@@ -132,7 +188,7 @@ int ExecBackend(const std::string &runner, int argc, char **argv,
   }
   arguments.push_back(nullptr);
 
-  setenv("FLORAL_NATIVEBRIDGE_BACKEND", backend, 1);
+  setenv("FLORAL_NATIVEBRIDGE_BACKEND", backend_name, 1);
   execv(runner.c_str(), arguments.data());
   LOG(ERROR) << "Unable to exec Floral NativeBridge runner " << runner
              << ": " << strerror(errno);
@@ -155,30 +211,26 @@ int main(int argc, char **argv) {
     return 126;
   }
 
-  const floral::nativebridge::PolicyEngine policy =
-      floral::nativebridge::PolicyEngine::Load(PolicyPath());
-  const auto selection = policy.SelectExecutable("", argv[elf_index]);
-  floral::nativebridge::BackendKind last_backend =
-      floral::nativebridge::BackendKind::kAuto;
-  for (const auto candidate : selection.candidates) {
-    // Loader mode only changes app namespace ownership inside ART. Standalone
-    // ELF runners should try each backend once in policy order.
-    if (candidate.backend == floral::nativebridge::BackendKind::kAuto ||
-        candidate.backend == last_backend) {
-      continue;
+  const floral::nativebridge::BackendKind backend = DefaultBackend(elf_class);
+  const bool allow_fallback = AutoBackendConfigured();
+  if (ExecBackend(RunnerPath(backend, elf_class), argc, argv, backend,
+                  elf_class) == 0) {
+    return 0;
+  }
+
+  if (allow_fallback) {
+    const auto fallback = AlternateBackend(backend);
+    if (elf_class != ElfClass::k32 ||
+        fallback != floral::nativebridge::BackendKind::kNdk) {
+      if (ExecBackend(RunnerPath(fallback, elf_class), argc, argv, fallback,
+                      elf_class) == 0) {
+        return 0;
+      }
     }
-    if (elf_class == ElfClass::k32 &&
-        candidate.backend == floral::nativebridge::BackendKind::kNdk) {
-      // The Android 12 NDK bundle is 64-bit only. ARM32 is intentionally
-      // Houdini-only so a partial NDK payload cannot win by accident.
-      continue;
-    }
-    last_backend = candidate.backend;
-    ExecBackend(RunnerPath(candidate.backend, elf_class), argc, argv,
-                floral::nativebridge::BackendKindName(candidate.backend));
   }
 
   LOG(ERROR) << "No usable Floral NativeBridge executable backend for "
-             << argv[elf_index] << " (policy=" << selection.name << ")";
+             << argv[elf_index] << " (backend="
+             << floral::nativebridge::BackendKindName(backend) << ")";
   return 127;
 }

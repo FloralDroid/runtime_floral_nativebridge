@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <sstream>
 #include <utility>
@@ -46,6 +47,7 @@ constexpr int GuestArchitecture() {
 
 constexpr char kGuestSystemNamespaceName[] = "floral-guest-system";
 constexpr char kAuditProperty[] = "persist.floral.nb.audit";
+constexpr char kProcessBackendEnvironment[] = "FLORAL_NATIVEBRIDGE_BACKEND";
 
 bool AuditEnabled() {
   return android::base::GetBoolProperty(kAuditProperty, false);
@@ -82,14 +84,6 @@ std::string ReadProcessName() {
   return std::string(buffer);
 }
 
-std::string ArchitectureLibraryDirectory() {
-#if defined(__LP64__)
-  return "/system/lib64/";
-#else
-  return "/system/lib/";
-#endif
-}
-
 void *OpenBackendLibrary(const std::string &path) {
   // A backend payload has a guest linker topology. Loading it through the
   // caller namespace can bind guest dependencies to host x86 libraries.
@@ -113,9 +107,7 @@ void *OpenBackendLibrary(const std::string &path) {
 
 } // namespace
 
-BackendManager::BackendManager()
-    : policy_path_(android::base::GetProperty(
-          "ro.floral.nativebridge.policy", PolicyEngine::kDefaultPath)) {}
+BackendManager::BackendManager() = default;
 
 BackendManager::~BackendManager() {
   for (const LoadedBackend &backend : loaded_backends_) {
@@ -188,10 +180,10 @@ void BackendManager::ConfigureProcessContext(const char *process_name,
   selected_backend_override_ =
       selected_backend == nullptr ? "" : selected_backend;
 
-  // This runs in the forked zygote child before dropping privileges. It can
-  // safely read Android-owned 0600 state without exposing it to applications.
-  const PolicyEngine policy = PolicyEngine::Load(policy_path_);
-  selection_ = policy.Select(process_name_.empty() ? package_name_ : process_name_);
+  selection_ = {};
+  selection_.reason = selected_backend_override_.empty()
+                          ? "installed backend"
+                          : "system server process selection";
   if (!selected_backend_override_.empty()) {
     const size_t separator = selected_backend_override_.find('/');
     const std::string backend_name = separator == std::string::npos
@@ -214,6 +206,15 @@ void BackendManager::ConfigureProcessContext(const char *process_name,
                    << selected_backend_override_;
     }
   }
+  if (selection_.candidates.empty()) {
+    selection_.kind = InstalledBackend(nullptr);
+    selection_.name = BackendKindName(selection_.kind);
+    selection_.loader_mode = LoaderMode::kHybrid;
+    selection_.candidates = {{selection_.kind, LoaderMode::kHybrid}};
+  }
+  if (selection_.kind != BackendKind::kAuto) {
+    setenv(kProcessBackendEnvironment, BackendKindName(selection_.kind), 1);
+  }
   selection_prepared_ = true;
   if (AuditEnabled()) {
     LOG(INFO) << "Floral NativeBridge audit: selection backend="
@@ -235,18 +236,56 @@ void BackendManager::ConfigureProcessContext(const char *process_name,
 }
 
 std::string BackendManager::BackendPath(BackendKind kind) const {
-  const std::string default_path = ArchitectureLibraryDirectory();
+  const bool is_64_bit = sizeof(void *) == 8;
+  const char *backend_name = nullptr;
+  const char *generic_property = nullptr;
+  const char *arch_property = nullptr;
+  const char *library_name = nullptr;
   switch (kind) {
   case BackendKind::kNdk:
-    return android::base::GetProperty("ro.floral.nativebridge.ndk",
-                                      default_path + "libndk_translation.so");
+    backend_name = "ndk";
+    generic_property = "ro.floral.nativebridge.ndk";
+    arch_property = is_64_bit ? "ro.floral.nativebridge.ndk64"
+                              : "ro.floral.nativebridge.ndk32";
+    library_name = "libndk_translation.so";
+    break;
   case BackendKind::kHoudini:
-    return android::base::GetProperty("ro.floral.nativebridge.houdini",
-                                      default_path + "libhoudini.so");
+    backend_name = "houdini";
+    generic_property = "ro.floral.nativebridge.houdini";
+    arch_property = is_64_bit ? "ro.floral.nativebridge.houdini64"
+                              : "ro.floral.nativebridge.houdini32";
+    library_name = "libhoudini.so";
+    break;
   case BackendKind::kAuto:
     return {};
   }
-  return {};
+  const std::string default_path =
+      std::string("/system/floral/") + backend_name +
+      (is_64_bit ? "/lib64/" : "/lib/") + library_name;
+  const std::string configured =
+      android::base::GetProperty(arch_property, "");
+  return configured.empty()
+             ? android::base::GetProperty(generic_property, default_path)
+             : configured;
+}
+
+bool BackendManager::BackendAvailable(BackendKind kind) const {
+  const std::string path = BackendPath(kind);
+  return !path.empty() && access(path.c_str(), R_OK) == 0;
+}
+
+BackendKind BackendManager::InstalledBackend(const char *instruction_set) const {
+  const bool arm32 = instruction_set != nullptr &&
+                     (strcmp(instruction_set, "arm") == 0 ||
+                      strcmp(instruction_set, "armeabi") == 0 ||
+                      strcmp(instruction_set, "armeabi-v7a") == 0);
+  if (arm32) {
+    return BackendKind::kHoudini;
+  }
+  if (BackendAvailable(BackendKind::kNdk)) {
+    return BackendKind::kNdk;
+  }
+  return BackendKind::kHoudini;
 }
 
 std::string BackendManager::GuestSystemLibraryDirectory(
@@ -372,7 +411,7 @@ const BackendManager::LoadedBackend *BackendManager::FindLoadedBackend(
 bool BackendManager::LoadSelectedBackend(const BackendSelection &selection,
                                          const char *instruction_set) {
   if (selection.exhausted) {
-    SetError("NativeBridge backend candidates exhausted by Android runtime state");
+    SetError("NativeBridge backend unavailable in installed Android 12 payload");
     return false;
   }
   if (selection.loader_mode == LoaderMode::kDirect) {
@@ -382,7 +421,7 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection,
     if (selection.candidates.size() != 1 ||
         selection.candidates.front().mode != LoaderMode::kDirect ||
         selection.candidates.front().backend == BackendKind::kAuto) {
-      SetError("direct NativeBridge policy must contain one explicit backend");
+      SetError("direct NativeBridge selection must contain one explicit backend");
       return false;
     }
     const BackendCandidate candidate = selection.candidates.front();
@@ -452,7 +491,7 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection,
     return true;
   }
 
-  SetError("no usable NativeBridge backend for policy " + selection.name);
+  SetError("no usable NativeBridge backend for installed Android 12 payload");
   return false;
 }
 
@@ -461,9 +500,14 @@ bool BackendManager::EnsureLoaded() {
     return true;
   }
   if (!selection_prepared_) {
-    // Non-zygote callers retain a conservative policy fallback.
-    const PolicyEngine policy = PolicyEngine::Load(policy_path_);
-    selection_ = policy.Select(ProcessName());
+    // Non-zygote callers use the installed Android 12 default backend. The
+    // backend is selected explicitly by system_server for normal app launches.
+    selection_ = {};
+    selection_.kind = InstalledBackend(instruction_set_.c_str());
+    selection_.name = BackendKindName(selection_.kind);
+    selection_.reason = "installed backend";
+    selection_.loader_mode = LoaderMode::kHybrid;
+    selection_.candidates = {{selection_.kind, LoaderMode::kHybrid}};
     selection_prepared_ = true;
   }
   return LoadSelectedBackend(selection_, instruction_set_.c_str());
