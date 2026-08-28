@@ -12,7 +12,8 @@ x86 Floral 产品应继承 `system/floral/nativebridge/nativebridge.mk`，由产
 
 Android 12 源码还需要 Floral Android 12 patch series 中的 ART、frameworks/base、
 system/core 和 linkerconfig 配套修改。它们负责桥接 ELF 路由、在 zygote 降权前
-传入所选后端、建立进程私有 guest sysroot，并处理早期 native 和 JNI 加载失败。
+传入所选后端、挂载 Houdini 的进程私有 guest sysroot，并处理早期 native 和 JNI
+加载失败。NDK Translation 使用 AOSP 构建产出的 ARM guest userspace。
 
 ## 后端选择
 
@@ -45,10 +46,10 @@ system_server 通过 zygote 专用启动参数一次性传入，不使用运行�
 NativeBridge v3 namespace 接口；加载、接口检查或初始化失败会直接报告给
 ART，避免两个转译运行时共享进程状态。后端 DSO 在 zygote fork 后通过 ART 的
 system linker namespace 和 `RTLD_NOW | RTLD_LOCAL` 按需加载，且只初始化所选
-后端。ART 在降权前传入 nice name、应用数据目录和一次性候选选择。zygote 在应用
-私有 mount namespace 中，把所选 payload 实际提供的 guest 库、二进制、linker config
-和 cpuinfo 挂到预建的 canonical target。ABI 环境沿用后端返回值，不修改全局
-`ro.product.cpu.*`。
+后端。ART 在降权前传入 nice name、应用数据目录和一次性候选选择。NDK 使用 canonical
+AOSP guest userspace；Houdini 才会在应用私有 mount namespace 中，把其 guest 库、
+二进制、linker config 和 cpuinfo 挂到预建的 canonical target。ABI 环境沿用后端
+返回值，不修改全局 `ro.product.cpu.*`。
 
 产品片段默认启用 `ro.floral.bridge.hybrid_elf=1`。配套 ART 补丁会为
 选择 `hybrid` 的桥接 classloader 同时建立宿主和桥接 namespace；系统提供的

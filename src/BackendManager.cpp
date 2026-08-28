@@ -283,6 +283,12 @@ std::string BackendManager::GuestSystemLibraryDirectory(
       instruction_set != nullptr &&
       (strcmp(instruction_set, "arm64") == 0 ||
        strcmp(instruction_set, "arm64-v8a") == 0);
+  // NDK Translation uses the guest userspace built with the AOSP image. Its
+  // payload contains only the host translator and binfmt runner.
+  if (kind == BackendKind::kNdk) {
+    return guest_arm64 ? "/system/lib64/arm64" : "/system/lib/arm";
+  }
+
   const std::string backend_path = BackendPath(kind);
   const size_t separator = backend_path.find_last_of('/');
   if (separator == std::string::npos) {

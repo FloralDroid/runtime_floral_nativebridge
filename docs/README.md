@@ -14,8 +14,9 @@ product to install the library and set `ro.dalvik.vm.native.bridge` to
 The Android 12 source tree also needs the companion ART, frameworks/base,
 system/core, and linkerconfig changes from the Floral Android 12 patch series.
 They route bridged native ELF files, pass the selected backend before the zygote
-child drops privileges, create the process-private guest sysroot, and handle
-early native and JNI-loader failures.
+child drops privileges, mount Houdini's process-private guest sysroot, and
+handle early native and JNI-loader failures. NDK Translation uses the ARM guest
+userspace produced by the AOSP build.
 
 ## Backend selection
 
@@ -58,9 +59,10 @@ ART, preventing two translation runtimes from sharing one process state.
 Backend DSOs are loaded only after zygote fork with ART's system linker namespace
 and `RTLD_NOW | RTLD_LOCAL`. Only the selected backend is initialized. ART
 explicitly passes the nice name, app data directory, and one-shot backend
-selection before privileges are dropped. Zygote bind-mounts that backend's
-available guest libraries, binaries, linker config, and cpuinfo over pre-created
-canonical targets in the application's private mount namespace.
+selection before privileges are dropped. NDK uses the canonical AOSP guest
+userspace. For Houdini, zygote bind-mounts its guest libraries, binaries, linker
+config, and cpuinfo over pre-created canonical targets in the application's
+private mount namespace.
 
 The product fragment enables `ro.floral.bridge.hybrid_elf=1`. With the
 companion ART patch, a bridged classloader selected for `hybrid` owns both native
