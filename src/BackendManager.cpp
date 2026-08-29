@@ -192,7 +192,7 @@ void BackendManager::ConfigureProcessContext(const char *process_name,
     const BackendKind selected = ParseBackendKind(backend_name);
     if (selected != BackendKind::kAuto) {
       const LoaderMode selected_mode = separator == std::string::npos
-                                           ? LoaderMode::kHybrid
+                                           ? LoaderMode::kDirect
                                            : ParseLoaderMode(
                                                  selected_backend_override_.substr(
                                                      separator + 1));
@@ -209,8 +209,8 @@ void BackendManager::ConfigureProcessContext(const char *process_name,
   if (selection_.candidates.empty()) {
     selection_.kind = InstalledBackend(nullptr);
     selection_.name = BackendKindName(selection_.kind);
-    selection_.loader_mode = LoaderMode::kHybrid;
-    selection_.candidates = {{selection_.kind, LoaderMode::kHybrid}};
+    selection_.loader_mode = LoaderMode::kDirect;
+    selection_.candidates = {{selection_.kind, LoaderMode::kDirect}};
   }
   if (selection_.kind != BackendKind::kAuto) {
     setenv(kProcessBackendEnvironment, BackendKindName(selection_.kind), 1);
@@ -233,24 +233,27 @@ std::string BackendManager::BackendPath(BackendKind kind) const {
   switch (kind) {
   case BackendKind::kNdk:
     backend_name = "ndk";
-    generic_property = "ro.floral.nativebridge.ndk";
-    arch_property = is_64_bit ? "ro.floral.nativebridge.ndk64"
-                              : "ro.floral.nativebridge.ndk32";
+    generic_property = "ro.floral.nb.ndk";
+    arch_property = is_64_bit ? "ro.floral.nb.ndk64"
+                              : "ro.floral.nb.ndk32";
     library_name = "libndk_translation.so";
     break;
   case BackendKind::kHoudini:
     backend_name = "houdini";
-    generic_property = "ro.floral.nativebridge.houdini";
-    arch_property = is_64_bit ? "ro.floral.nativebridge.houdini64"
-                              : "ro.floral.nativebridge.houdini32";
+    generic_property = "ro.floral.nb.houdini";
+    arch_property = is_64_bit ? "ro.floral.nb.houdini64"
+                              : "ro.floral.nb.houdini32";
     library_name = "libhoudini.so";
     break;
   case BackendKind::kAuto:
     return {};
   }
   const std::string default_path =
-      std::string("/system/floral/") + backend_name +
-      (is_64_bit ? "/lib64/" : "/lib/") + library_name;
+      kind == BackendKind::kNdk
+          ? std::string("/system/") + (is_64_bit ? "lib64/" : "lib/") +
+                library_name
+          : std::string("/system/floral/") + backend_name +
+                (is_64_bit ? "/lib64/" : "/lib/") + library_name;
   const std::string configured =
       android::base::GetProperty(arch_property, "");
   return configured.empty()
@@ -311,8 +314,16 @@ std::string BackendManager::GuestSystemLibraryDirectory(
     return {};
   }
 
-  return backend_library_directory +
-         (guest_arm64 ? "/lib64/arm64" : "/lib/arm");
+  const std::string guest_directory =
+      backend_library_directory +
+      (guest_arm64 ? "/lib64/arm64" : "/lib/arm");
+  if (kind == BackendKind::kHoudini) {
+    const std::string nb_directory = guest_directory + "/nb";
+    if (access(nb_directory.c_str(), R_OK | X_OK) == 0) {
+      return guest_directory + ":" + nb_directory;
+    }
+  }
+  return guest_directory;
 }
 
 bool BackendManager::CandidateSupportsInstructionSet(
@@ -340,8 +351,13 @@ bool BackendManager::EnsureGuestSystemNamespace(const char *instruction_set) {
 
   const std::string library_directory =
       GuestSystemLibraryDirectory(selection_.kind, instruction_set);
-  if (library_directory.empty() ||
-      access(library_directory.c_str(), R_OK | X_OK) != 0) {
+  const size_t separator = library_directory.find(':');
+  const std::string primary_library_directory =
+      separator == std::string::npos
+          ? library_directory
+          : library_directory.substr(0, separator);
+  if (primary_library_directory.empty() ||
+      access(primary_library_directory.c_str(), R_OK | X_OK) != 0) {
     LOG(WARNING) << "Floral NativeBridge: guest system library directory is "
                     "unavailable for "
                  << BackendKindName(selection_.kind) << ": "
@@ -440,47 +456,9 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection,
     SetError("NativeBridge backend unavailable in installed Android 12 payload");
     return false;
   }
-  if (selection.loader_mode == LoaderMode::kDirect) {
-    // Direct is an explicit, single-backend contract. Never walk another
-    // candidate here: doing so would reintroduce recovery and make the
-    // backend observable as a Floral-managed loader.
-    if (selection.candidates.size() != 1 ||
-        selection.candidates.front().mode != LoaderMode::kDirect ||
-        selection.candidates.front().backend == BackendKind::kAuto) {
-      SetError("direct NativeBridge selection must contain one explicit backend");
-      return false;
-    }
-    const BackendCandidate candidate = selection.candidates.front();
-    if (!CandidateSupportsInstructionSet(candidate.backend, instruction_set)) {
-      SetError("explicit direct NativeBridge backend does not support instruction set");
-      return false;
-    }
-    if (FindLoadedBackend(candidate.backend) == nullptr &&
-        !LoadBackend(candidate.backend, BackendPath(candidate.backend))) {
-      SetError("explicit direct NativeBridge backend could not be loaded");
-      return false;
-    }
-    const LoadedBackend *backend = FindLoadedBackend(candidate.backend);
-    if (backend == nullptr) {
-      SetError("explicit direct NativeBridge backend disappeared after loading");
-      return false;
-    }
-    callbacks_ = backend->callbacks;
-    selection_.kind = candidate.backend;
-    selection_.loader_mode = LoaderMode::kDirect;
-    selection_.name = BackendKindName(candidate.backend);
-    selection_.reason = selection.reason;
-    selected_path_ = backend->path;
-    LOG(INFO) << "Selected " << selection_.name
-              << " NativeBridge backend in direct mode from " << selected_path_
-              << " (interface v" << callbacks_->version << ")";
-    // Direct mode is a transparent single-backend contract. Do not continue
-    // into the hybrid candidate loop or initialize Floral guest namespaces.
-    return true;
-  }
   const std::vector<BackendCandidate> default_candidates = {
-      {BackendKind::kNdk, LoaderMode::kHybrid},
-      {BackendKind::kHoudini, LoaderMode::kHybrid},
+      {BackendKind::kNdk, LoaderMode::kDirect},
+      {BackendKind::kHoudini, LoaderMode::kDirect},
   };
   const std::vector<BackendCandidate> &candidates = selection.candidates.empty()
                                                         ? default_candidates
@@ -495,6 +473,10 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection,
                 << (instruction_set == nullptr ? "<unknown>" : instruction_set);
       continue;
     }
+    if (candidate.mode == LoaderMode::kHybrid) {
+      LOG(INFO) << "Normalizing legacy hybrid candidate for "
+                << BackendKindName(candidate.backend) << " to direct mode";
+    }
     const LoadedBackend *backend = FindLoadedBackend(candidate.backend);
     if (backend == nullptr &&
         !LoadBackend(candidate.backend, BackendPath(candidate.backend))) {
@@ -507,7 +489,7 @@ bool BackendManager::LoadSelectedBackend(const BackendSelection &selection,
 
     callbacks_ = backend->callbacks;
     selection_.kind = candidate.backend;
-    selection_.loader_mode = candidate.mode;
+    selection_.loader_mode = LoaderMode::kDirect;
     selection_.name = BackendKindName(candidate.backend);
     selection_.reason = selection.reason;
     selected_path_ = backend->path;
@@ -532,8 +514,8 @@ bool BackendManager::EnsureLoaded() {
     selection_.kind = InstalledBackend(instruction_set_.c_str());
     selection_.name = BackendKindName(selection_.kind);
     selection_.reason = "installed backend";
-    selection_.loader_mode = LoaderMode::kHybrid;
-    selection_.candidates = {{selection_.kind, LoaderMode::kHybrid}};
+    selection_.loader_mode = LoaderMode::kDirect;
+    selection_.candidates = {{selection_.kind, LoaderMode::kDirect}};
     selection_prepared_ = true;
   }
   return LoadSelectedBackend(selection_, instruction_set_.c_str());

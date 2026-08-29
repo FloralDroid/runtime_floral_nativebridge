@@ -2,10 +2,10 @@
 
 `libmixbridge.so` is a single Android NativeBridge entry point for x86 Android
 images that need to run ARM applications. It selects one backend per process
-without placing translation binaries in this repository. Hybrid mode forwards
-Android 12 NativeBridge v6 callbacks; direct mode asks ART to bind the selected
-backend callback table itself. A process never keeps both translation runtimes
-resident.
+without placing translation binaries in this repository. ART binds the selected
+backend callback table directly; the router is only used to choose the backend
+and is released before application initialization. A process never keeps both
+translation runtimes resident.
 
 Include `system/floral/nativebridge/nativebridge.mk` from an x86 Floral device
 product to install the library and set `ro.dalvik.vm.native.bridge` to
@@ -14,20 +14,21 @@ product to install the library and set `ro.dalvik.vm.native.bridge` to
 The Android 12 source tree also needs the companion ART, frameworks/base,
 system/core, and linkerconfig changes from the Floral Android 12 patch series.
 They route bridged native ELF files, pass the selected backend before the zygote
-child drops privileges, mount Houdini's process-private guest sysroot, and
-handle early native and JNI-loader failures. NDK Translation uses the ARM guest
-userspace produced by the AOSP build.
+child drops privileges, mount backend-private linker configuration and
+Houdini's process-private guest sysroot, and handle early native and JNI-loader
+failures. NDK Translation uses the ARM guest userspace produced by the AOSP
+build.
 
 ## Backend selection
 
 No host policy or runtime JSON state file is used. For ARM64 applications,
-`ro.floral.nativebridge.default_backend=auto` starts with NDK Translation and
+`ro.floral.nb.default_backend=auto` starts with NDK Translation and
 uses Houdini as the fallback. Setting the read-only property to `houdini`
 reverses that order. ARM32 applications always use Houdini because the Android
 12 NDK payload is ARM64-only.
 
 Before each translated application fork, system_server selects one
-`backend/hybrid` candidate. It keeps package version, failed candidates, and the
+`backend/direct` candidate. It keeps package version, failed candidates, and the
 successful candidate in a bounded in-memory table. A native crash or supported
 JNI/ELF loader failure within 60 seconds selects the next untried candidate for
 the next fresh zygote launch. Only a foreground main process restores its task;
@@ -43,10 +44,14 @@ and ARM32 uses Houdini. Its `execv()` fallback only covers failure to start a
 backend runner. It cannot switch runtimes after a backend runner has started.
 
 Backend paths can be overridden with the read-only architecture-specific
-properties `ro.floral.nativebridge.ndk64`, `houdini32`, and `houdini64`. The
-default payload roots are `/system/floral/ndk` and `/system/floral/houdini`.
+properties `ro.floral.nb.ndk64`, `ro.floral.nb.houdini32`, and
+`ro.floral.nb.houdini64`. The
+NDK host payload uses its canonical `/system` paths and keeps its linker
+configuration under `/system/floral/ndk`; Houdini remains under
+`/system/floral/houdini`.
 Standalone runner paths can be overridden with
-`ro.floral.nativebridge.runner.ndk64`, `houdini32`, and `houdini64`.
+`ro.floral.nb.runner.ndk64`, `ro.floral.nb.runner.houdini32`, and
+`ro.floral.nb.runner.houdini64`.
 The `ndk32` runner is intentionally not a supported candidate.
 
 The router does not monitor processes or switch a backend inside a live process.
@@ -60,20 +65,20 @@ Backend DSOs are loaded only after zygote fork with ART's system linker namespac
 and `RTLD_NOW | RTLD_LOCAL`. Only the selected backend is initialized. ART
 explicitly passes the nice name, app data directory, and one-shot backend
 selection before privileges are dropped. NDK uses the canonical AOSP guest
-userspace. For Houdini, zygote bind-mounts its guest libraries, binaries, linker
-config, and cpuinfo over pre-created canonical targets in the application's
-private mount namespace.
+userspace and receives only its private linker configuration in the application's
+mount namespace. For Houdini, zygote bind-mounts its guest libraries, binaries,
+linker config, and cpuinfo over pre-created canonical targets in the
+application's private mount namespace.
 
-The product fragment enables `ro.floral.bridge.hybrid_elf=1`. With the
-companion ART patch, a bridged classloader selected for `hybrid` owns both native
-and bridged linker namespaces. System-provided x86/x86_64 ELF files retain host
-ownership. PackageManager first scans the complete package for a public ARM ABI.
+The product fragment disables `ro.floral.bridge.hybrid_elf` and selects direct
+backend ownership. System-provided x86/x86_64 ELF files retain host ownership.
+PackageManager first scans the complete package for a public ARM ABI.
 If any base or split APK contains ARM native libraries, only ARM ABIs are selected
 and extracted. Host x86/x86_64 is selected only for packages with no ARM native
 libraries. Every app-private ELF in a bridged process stays with the selected
 translation backend, even if its ELF header advertises x86; it never falls back
 to the host namespace. The returned handle records which owner must perform JNI
-and unload operations. `direct` creates no Floral host namespace, performs no
+and unload operations. Direct mode creates no Floral host namespace, performs no
 Floral ELF split, and enables no Floral guest identity; ART owns the selected
 backend handle and callback table exactly as it does for a standalone NativeBridge.
 A single ELF dependency graph still cannot mix architectures.

@@ -93,10 +93,10 @@ int main() {
             "exact process rule") &&
       Check(exact.candidates.size() == 2 &&
                 exact.candidates[0].backend == floral::nativebridge::BackendKind::kHoudini &&
-                exact.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid &&
+                exact.candidates[0].mode == floral::nativebridge::LoaderMode::kDirect &&
                 exact.candidates[1].backend == floral::nativebridge::BackendKind::kNdk &&
-                exact.candidates[1].mode == floral::nativebridge::LoaderMode::kHybrid,
-            "automatic selection contains hybrid candidates only") &&
+                exact.candidates[1].mode == floral::nativebridge::LoaderMode::kDirect,
+            "automatic selection contains direct candidates only") &&
       Check(process.kind == floral::nativebridge::BackendKind::kAuto &&
                 process.candidates.size() == exact.candidates.size() &&
                 process.candidates[0].backend == exact.candidates[0].backend &&
@@ -119,9 +119,12 @@ int main() {
       Check(preferred.kind == floral::nativebridge::BackendKind::kAuto &&
                 preferred.candidates.size() == 2 &&
                 preferred.candidates[0].backend == floral::nativebridge::BackendKind::kNdk &&
-                preferred.candidates[0].mode == floral::nativebridge::LoaderMode::kHybrid &&
+                preferred.candidates[0].mode == floral::nativebridge::LoaderMode::kDirect &&
                 preferred.candidates[1].backend == floral::nativebridge::BackendKind::kHoudini &&
-                preferred.candidates[1].mode == floral::nativebridge::LoaderMode::kHybrid,
-             "preferred backend keeps automatic fallback");
+                preferred.candidates[1].mode == floral::nativebridge::LoaderMode::kDirect,
+             "preferred backend keeps automatic fallback") &&
+      Check(floral::nativebridge::ParseLoaderMode("hybrid") ==
+                floral::nativebridge::LoaderMode::kDirect,
+            "legacy hybrid mode is normalized to direct");
   return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }

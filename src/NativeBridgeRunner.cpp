@@ -32,18 +32,18 @@
 
 namespace {
 
-constexpr char kNdk32RunnerProperty[] = "ro.floral.nativebridge.runner.ndk32";
-constexpr char kNdk64RunnerProperty[] = "ro.floral.nativebridge.runner.ndk64";
+constexpr char kNdk32RunnerProperty[] = "ro.floral.nb.runner.ndk32";
+constexpr char kNdk64RunnerProperty[] = "ro.floral.nb.runner.ndk64";
 constexpr char kHoudini32RunnerProperty[] =
-    "ro.floral.nativebridge.runner.houdini32";
+    "ro.floral.nb.runner.houdini32";
 constexpr char kHoudini64RunnerProperty[] =
-    "ro.floral.nativebridge.runner.houdini64";
+    "ro.floral.nb.runner.houdini64";
 constexpr char kDefaultBackendProperty[] =
-    "ro.floral.nativebridge.default_backend";
+    "ro.floral.nb.default_backend";
 constexpr char kDefaultNdk32Runner[] =
-    "/system/floral/ndk/bin/ndk_translation_program_runner_binfmt_misc";
+    "/system/bin/ndk_translation_program_runner_binfmt_misc";
 constexpr char kDefaultNdk64Runner[] =
-    "/system/floral/ndk/bin/ndk_translation_program_runner_binfmt_misc_arm64";
+    "/system/bin/ndk_translation_program_runner_binfmt_misc_arm64";
 constexpr char kDefaultHoudini32Runner[] = "/system/floral/houdini/bin/houdini";
 constexpr char kDefaultHoudini64Runner[] = "/system/floral/houdini/bin/houdini64";
 
@@ -101,8 +101,8 @@ const char *BackendLibraryDirectory(
     floral::nativebridge::BackendKind backend, ElfClass elf_class) {
   switch (backend) {
   case floral::nativebridge::BackendKind::kNdk:
-    return elf_class == ElfClass::k32 ? "/system/floral/ndk/lib"
-                                      : "/system/floral/ndk/lib64";
+    return elf_class == ElfClass::k32 ? "/system/lib"
+                                      : "/system/lib64";
   case floral::nativebridge::BackendKind::kHoudini:
     return elf_class == ElfClass::k32 ? "/system/floral/houdini/lib"
                                       : "/system/floral/houdini/lib64";

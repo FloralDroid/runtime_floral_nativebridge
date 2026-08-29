@@ -133,8 +133,8 @@ extern "C" void FloralNativeBridgeSetProcessContext(const char *process_name,
                                                  selected_backend);
 }
 
-// ART uses this per-process bit only to enable Floral's hybrid enhancement.
-// A false result leaves the platform NativeLoader behavior unchanged.
+// Kept as a compatibility hook for older ART callers. Direct mode never
+// enables Floral's hybrid namespace forwarding.
 extern "C" bool FloralNativeBridgeUseHybridLoader() {
   const bool use_hybrid = floral::nativebridge::UseHybridLoader();
   if (floral::nativebridge::AuditEnabled()) {

@@ -30,8 +30,8 @@ enum class BackendKind {
   kHoudini,
 };
 
-// Hybrid enables Floral's mixed-ABI and guest-identity enhancements. Direct
-// keeps Android's original NativeLoader behavior and only selects the backend.
+// Hybrid is retained for source compatibility with older callers. New
+// selections use direct mode so ART owns exactly one backend callback table.
 enum class LoaderMode {
   kHybrid,
   kDirect,
@@ -41,12 +41,12 @@ enum class LoaderMode {
 
 struct BackendCandidate {
   BackendKind backend = BackendKind::kAuto;
-  LoaderMode mode = LoaderMode::kHybrid;
+  LoaderMode mode = LoaderMode::kDirect;
 };
 
 struct BackendSelection {
   BackendKind kind = BackendKind::kAuto;
-  LoaderMode loader_mode = LoaderMode::kHybrid;
+  LoaderMode loader_mode = LoaderMode::kDirect;
   std::string name = "auto";
   std::string reason = "default";
   std::vector<BackendCandidate> candidates;
